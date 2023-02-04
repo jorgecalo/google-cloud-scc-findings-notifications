@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------
-# TITLE OF PROJECT OR APP NAME
+# Google Cloud Security Command Center finding notifications to Slack
 #------------------------------------------------------------------------------
 
 ###############################################################################
@@ -24,13 +24,13 @@ resource "google_project_service" "secretmanager" {
 }
 
 ###############################################################################
-# TITLE
+# Deployment of required resource for running SCC to Slack source code
 ###############################################################################
 
 # Create Pubsub topic. SCC will publish the findings on this topic. Defined project in resource.
 resource "google_pubsub_topic" "sccfindings" {
   name    = "scc-findingsnotifier-topic"
-  project = "[INSERT-PROJECT-NAME]"
+  project = var.gcp_project_id
   message_storage_policy {
     allowed_persistence_regions = [
       "europe-west1",
@@ -41,18 +41,20 @@ resource "google_pubsub_topic" "sccfindings" {
 
 resource "google_scc_notification_config" "custom_notification_config" {
   config_id    = "security-scc-notify-config"
-  organization = "[INSERT-ORG-ID]"
+  organization = var.gcp_org_id
   description  = "Security team Custom Cloud SCC Finding Notification Configuration"
   pubsub_topic = google_pubsub_topic.sccfindings.id
 
   streaming_config {
     filter = "severity = \"HIGH\" OR severity= \"CRITICAL\" AND state = \"ACTIVE\""
+    #HERE YOU CAN FILTER ON PROJECTS WHICH TO INCLUDE. Figure out the filtering for multiple projects AND "..."
+
   }
 }
 
 # Create pubsub subscription that notifies Cloud Function.
 resource "google_pubsub_subscription" "sccfinding-cf-sub" {
-  project = "[INSERT-PROJECT-NAME]"
+  project = var.gcp_project_id
   name    = "sccfinding-subscription"
   topic   = google_pubsub_topic.sccfindings.name
 
@@ -74,9 +76,9 @@ resource "google_pubsub_subscription" "sccfinding-cf-sub" {
 
 #Create Google Storage bucket that will host source code in region Europe West1
 resource "google_storage_bucket" "function_bucket" {
-  project  = "[INSERT-PROJECT-NAME]"
+  project  = var.gcp_project_id
   name     = "scc-slack-notifier-cf-bucket"
-  location = "europe-west1"
+  location = var.gcp_region
 }
 
 #Generate an archive of the source code compressed as a .zip file. Source is stored in the Terraform directory /app/
@@ -97,11 +99,11 @@ resource "google_storage_bucket_object" "zip" {
 
 # Create Cloud Function with Python Runtime.
 resource "google_cloudfunctions_function" "cf" {
-  project               = "[INSERT-PROJECT-NAME]"
-  region                = "europe-west1" #Cloud Function is not available in europe-west4 (Netherlands)
+  project               = var.gcp_project_id
+  region                = var.gcp_region
   name                  = "scc-slack-notifier"
   description           = "Security Command Center findings notifier to Slack"
-  runtime               = "python38"
+  runtime               = "python39"
   service_account_email = google_service_account.sccnotifier.email
 
   timeout             = 540
@@ -124,12 +126,18 @@ resource "google_cloudfunctions_function" "cf" {
     }
 
   }
+  labels = {
+    "app"         = var.labels_app
+    "environment" = var.labels_environment
+    "tf"          = true
+  }
+
   entry_point = "send_slack_chat_notification"
 }
 
 #Create Service Account. Defined project in resource.
 resource "google_service_account" "sccnotifier" {
-  project      = "[INSERT-PROJECT-NAME]"
+  project      = var.gcp_project_id
   display_name = "The sccnotifier service"
   account_id   = "sccnotifier"
 }
@@ -143,15 +151,15 @@ resource "google_service_account_iam_member" "sccnotifier_service_account_user_s
 
 # Create Secret Manager resource for Slack Bot token. Defined project in resource.
 resource "google_secret_manager_secret" "slack_bot_token" {
-  project   = "[INSERT-PROJECT-NAME]"
+  project   = var.gcp_project_id
   secret_id = "sccnotifier-slack-bot-token"
   replication {
     user_managed {
       replicas {
-        location = "europe-west1"
+        location = var.gcp_region
       }
       replicas {
-        location = "europe-west3"
+        location = var.gcp_region-2
       }
     }
 
@@ -176,5 +184,5 @@ resource "google_secret_manager_secret_version" "slack_bot_token" {
 data "google_kms_secret" "slack_bot_token" {
   #  ## Token Slack bot for Workspace and GCP-SCC-Finding-Notifier app
   crypto_key = "[INSERT-PROJECT-NAME]/europe-west4/audit-global-generic/audit-generic"
-  ciphertext = "CiQApUUO9zdpjyzpXG0g2W8yAaCx/jj4bI7goimvDdP/8LCgo5YSYQDgNkJLQZ7/J3V2nyBkEcaBJW9KunfxZo7qXXd7nnLUxAwxEpS+28rVG49iRDUayqZ00cFK2lRTg0U982CiIwnFGUuYQ64q9IWQFPO6UCEezGt0LVekwFipTr2Fr2GbIAY="
+  ciphertext = "//ADD-CIPHER-TEXT-symmetric-key"
 }
