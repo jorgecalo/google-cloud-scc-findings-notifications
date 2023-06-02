@@ -49,8 +49,8 @@ resource "google_scc_notification_config" "custom_notification_config" {
     filter = "severity = \"HIGH\" OR severity= \"CRITICAL\" AND state = \"ACTIVE\""
         projects = [
            "project-1", 
-            "project-2", 
-             "project-3"
+           "project-2", 
+           "project-3"
     ]
   }
 }
