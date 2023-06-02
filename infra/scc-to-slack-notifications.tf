@@ -47,8 +47,11 @@ resource "google_scc_notification_config" "custom_notification_config" {
 
   streaming_config {
     filter = "severity = \"HIGH\" OR severity= \"CRITICAL\" AND state = \"ACTIVE\""
-    #HERE YOU CAN FILTER ON PROJECTS WHICH TO INCLUDE. Figure out the filtering for multiple projects AND "..."
-
+        projects = [
+           "project-1", 
+            "project-2", 
+             "project-3"
+    ]
   }
 }
 
