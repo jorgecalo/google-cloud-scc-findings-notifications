@@ -11,12 +11,26 @@ Replace the [INSERT-ORG-ID] with the ORGID (Number).
    --pubsub-topic projects/tf-scc-notifier/topics/scc-findingsnotifier-topic \
    --organization [INSERT-ORG-ID] \
    --filter "(severity=\"HIGH\" OR severity=\"CRITICAL\") AND state=\"ACTIVE\""
+```
 
+Filtering Security Command Center findings based on the most important projects is done by adjusting the 
+filter option of the streaming_config:
+
+```
+  streaming_config {
+    filter = "severity = \"HIGH\" OR severity= \"CRITICAL\" AND state = \"ACTIVE\""
+        projects = [
+           "project-1", 
+           "project-2", 
+           "project-3", 
+           "project-4"
+    ]
+  }
+}
 ```
 
 Cloud Function runs a Python script and is triggerd when a message is posted onto the PubSub topic. Cloud Function will send a notification message to the Slack channel #security-gcp-alerts. 
 
-The Slack bot token is stored in Google Cloud Secret Manager and the secret in the Terraform plan is encrypted with Google Cloud KMS. In Slack we have the app GCP-SCC-Finding-Notifier installed into the Mollie Workspace.
+The Slack bot token is stored in Google Cloud Secret Manager and the secret in the Terraform plan is encrypted with Google Cloud KMS. In Slack we have the app GCP-SCC-Finding-Notifier installed into the Org Slack Workspace.
 
 The source code can be found in /terraform/functions/scc-finding-slack-notifications
-
