@@ -40,8 +40,6 @@ resource "google_kms_key_ring" "keyring-europe-west4" {
   location = "europe-west4"
 }
 
-projects/playground-jliauw/locations/eur6/keyRings/test
-
 # Create Cloud KMS Crypto Ring 
 
 resource "google_kms_crypto_key" "kms-cryptokey" {
@@ -69,11 +67,14 @@ resource "google_scc_notification_config" "custom_notification_config" {
 
   streaming_config {
     filter = "severity = \"HIGH\" OR severity= \"CRITICAL\" AND state = \"ACTIVE\""
-        projects = [
-           "project-1", 
-           "project-2", 
-           "project-3"
-    ]
+    #HERE YOU CAN FILTER ON PROJECTS WHICH TO INCLUDE. Figure out the filtering for multiple projects AND "..."
+    # projects = [
+    #      "project-1", 
+    #      "project-2", 
+    #      "project-3", 
+    #      "project-4"
+    #]
+
   }
 }
 
@@ -128,7 +129,7 @@ resource "google_cloudfunctions_function" "cf" {
   region                = var.gcp_region
   name                  = "scc-slack-notifier"
   description           = "Security Command Center findings notifier to Slack"
-  runtime               = "python39"
+  runtime               = "python310"
   service_account_email = google_service_account.sccnotifier.email
 
   timeout             = 540
