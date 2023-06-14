@@ -1,5 +1,5 @@
 #------------------------------------------------------------------------------
-# Google Cloud Security Command Center finding notifications to Slack
+# Google Cloud Security Command Center finding notifications to Slack v1.1.0
 #------------------------------------------------------------------------------
 
 ###############################################################################
@@ -18,6 +18,11 @@ resource "google_project_service" "service_networking" {
   disable_on_destroy         = false
 }
 
+resource "google_project_service" "cloudkms" {
+  service            = "cloudkms.googleapis.com"
+  disable_on_destroy = false
+}
+
 resource "google_project_service" "secretmanager" {
   service            = "secretmanager.googleapis.com"
   disable_on_destroy = false
@@ -26,6 +31,23 @@ resource "google_project_service" "secretmanager" {
 ###############################################################################
 # Deployment of required resource for running SCC to Slack source code
 ###############################################################################
+
+# Create Cloud KMS Key Ring 
+
+resource "google_kms_key_ring" "keyring-europe-west4" {
+  project  = var.gcp_project_id
+  name     = "keyring-europe-west4"
+  location = "europe-west4"
+}
+
+projects/playground-jliauw/locations/eur6/keyRings/test
+
+# Create Cloud KMS Crypto Ring 
+
+resource "google_kms_crypto_key" "kms-cryptokey" {
+  name     = "kms-cryptokey"
+  key_ring = google_kms_key_ring.keyring-europe-west4.self_link
+}
 
 # Create Pubsub topic. SCC will publish the findings on this topic. Defined project in resource.
 resource "google_pubsub_topic" "sccfindings" {
@@ -184,5 +206,5 @@ resource "google_secret_manager_secret_version" "slack_bot_token" {
 data "google_kms_secret" "slack_bot_token" {
   #  ## Token Slack bot for Workspace and GCP-SCC-Finding-Notifier app
   crypto_key = "[INSERT-PROJECT-NAME]/europe-west4/audit-global-generic/audit-generic"
-  ciphertext = "//ADD-CIPHER-TEXT-symmetric-key"
+  ciphertext = "//COPY-CIPHER-TEXT-symmetric-key-VALUE//"
 }
