@@ -4,23 +4,23 @@
 
 variable "gcp_org_id" {
   type    = string
-  default = "?"
+  default = "	362295884660"
 }
 
 variable "gcp_project_id" {
   type    = string
-  default = "?"
+  default = "playground-jliauw"
 }
 
-variable "labels_app" {
-  type    = string
-  default = "?"
-}
+# variable "labels_app" {
+#   type    = string
+#   default = "?"
+# }
 
-variable "labels_environment" {
-  type    = string
-  default = "?"
-}
+# variable "labels_environment" {
+#   type    = string
+#   default = "?"
+# }
 
 variable "gcp_region" {
   description = "Default region for Google provider"

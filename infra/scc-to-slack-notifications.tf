@@ -18,11 +18,6 @@ resource "google_project_service" "service_networking" {
   disable_on_destroy         = false
 }
 
-resource "google_project_service" "cloudkms" {
-  service            = "cloudkms.googleapis.com"
-  disable_on_destroy = false
-}
-
 resource "google_project_service" "secretmanager" {
   service            = "secretmanager.googleapis.com"
   disable_on_destroy = false
@@ -31,21 +26,6 @@ resource "google_project_service" "secretmanager" {
 ###############################################################################
 # Deployment of required resource for running SCC to Slack source code
 ###############################################################################
-
-# Create Cloud KMS Key Ring 
-
-resource "google_kms_key_ring" "keyring-europe-west4" {
-  project  = var.gcp_project_id
-  name     = "keyring-europe-west4"
-  location = "europe-west4"
-}
-
-# Create Cloud KMS Crypto Ring 
-
-resource "google_kms_crypto_key" "kms-cryptokey" {
-  name     = "kms-cryptokey"
-  key_ring = google_kms_key_ring.keyring-europe-west4.self_link
-}
 
 # Create Pubsub topic. SCC will publish the findings on this topic. Defined project in resource.
 resource "google_pubsub_topic" "sccfindings" {
@@ -152,11 +132,12 @@ resource "google_cloudfunctions_function" "cf" {
     }
 
   }
-  labels = {
-    "app"         = var.labels_app
-    "environment" = var.labels_environment
-    "tf"          = true
-  }
+
+#  labels = {
+#    "app"         = var.labels_app
+#    "environment" = var.labels_environment
+#    "tf"          = true
+#  }
 
   entry_point = "send_slack_chat_notification"
 }
@@ -209,6 +190,8 @@ resource "google_secret_manager_secret_version" "slack_bot_token" {
 
 data "google_kms_secret" "slack_bot_token" {
   #  ## Token Slack bot for Workspace and GCP-SCC-Finding-Notifier app
-  crypto_key = "[INSERT-PROJECT-NAME]/europe-west4/audit-global-generic/audit-generic"
-  ciphertext = "//COPY-CIPHER-TEXT-symmetric-key-VALUE//"
+  crypto_key = "playground-jliauw/locations/europe-west4/keyRings/europe-west4-generic/cryptoKeys/generic-key"
+  ciphertext = "CiQAjpCQLhps3Gqy26V7Xu4ZlcKOZugIuCh50mIpBfpqjpJy3qYSXwDtWIZHNEuzWNTPS9/k62Vz
+JNW7dOn6XRI/o47el2nsMK939X/cdRBJtCnO//uHT9dBFkIN343IixndZZrViD7IqDklgygkh51z
+6i2K2l5HcSxGHRnzutisGaQAAKLs"
 }
