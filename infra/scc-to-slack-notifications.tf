@@ -6,6 +6,18 @@
 # Enable APIs - Enable required APIs for deployment
 ###############################################################################
 
+resource "google_project_service" "cloudresourcemanager" {
+  service                    = "cloudresourcemanager.googleapis.com"
+  disable_dependent_services = false
+  disable_on_destroy         = false
+}
+
+resource "google_project_service" "storage" {
+  service                    = "storage.googleapis.com"
+  disable_dependent_services = false
+  disable_on_destroy         = false
+}
+
 resource "google_project_service" "compute" {
   service                    = "compute.googleapis.com"
   disable_dependent_services = false
@@ -81,17 +93,21 @@ resource "google_pubsub_subscription" "sccfinding-cf-sub" {
 }
 
 #Create Google Storage bucket that will host source code in region Europe West1
+resource "random_id" "bucket_prefix" {
+  byte_length = 8
+}
+
 resource "google_storage_bucket" "function_bucket" {
   project  = var.gcp_project_id
-  name     = "scc-slack-notifier-cf-bucket"
+  name     = "${random_id.bucket_prefix.hex}-var.gcp_cloudstorage_name_bucket"
   location = var.gcp_region
 }
 
 #Generate an archive of the source code compressed as a .zip file. Source is stored in the Terraform directory /app/
 data "archive_file" "source" {
   type        = "zip"
-  source_dir  = "${path.root}/app/scc-finding-slack-notifications"
-  output_path = "${path.root}/cf-scc-notification.zip"
+  source_dir  = "${path.root}/../app/scc-finding-slack-notifications"
+  output_path = "${path.root}/../cf-scc-notification.zip"
 }
 
 # Add source code zip to bucket
@@ -132,12 +148,6 @@ resource "google_cloudfunctions_function" "cf" {
     }
 
   }
-
-#  labels = {
-#    "app"         = var.labels_app
-#    "environment" = var.labels_environment
-#    "tf"          = true
-#  }
 
   entry_point = "send_slack_chat_notification"
 }
@@ -189,9 +199,7 @@ resource "google_secret_manager_secret_version" "slack_bot_token" {
 }
 
 data "google_kms_secret" "slack_bot_token" {
-  #  ## Token Slack bot for Workspace and GCP-SCC-Finding-Notifier app
-  crypto_key = "playground-jliauw/locations/europe-west4/keyRings/europe-west4-generic/cryptoKeys/generic-key"
-  ciphertext = "CiQAjpCQLhps3Gqy26V7Xu4ZlcKOZugIuCh50mIpBfpqjpJy3qYSXwDtWIZHNEuzWNTPS9/k62Vz
-JNW7dOn6XRI/o47el2nsMK939X/cdRBJtCnO//uHT9dBFkIN343IixndZZrViD7IqDklgygkh51z
-6i2K2l5HcSxGHRnzutisGaQAAKLs"
+  #  ## Token Slack bot for Workspace and GCP-SCC-Finding-Notifier app. Ciphertext should be a single line string.
+  crypto_key = "projects/playground-jliauw/locations/europe-west4/keyRings/europe-west4-generic/cryptoKeys/generic-key"
+  ciphertext = "CiQAjpCQLhps3Gqy26V7Xu4ZlcKOZugIuCh50mIpBfpqjpJy3qYSXwDtWIZHNEuzWNTPS9/k62VzJNW7dOn6XRI/o47el2nsMK939X/cdRBJtCnO//uHT9dBFkIN343IixndZZrViD7IqDklgygkh51z6i2K2l5HcSxGHRnzutisGaQAAKLs"
 }

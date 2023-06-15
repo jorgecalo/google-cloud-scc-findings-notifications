@@ -41,7 +41,7 @@ Set path for KMS Crypto key path:
 Format: project-name/location/name-location/keyRings/keyring-name/cryptoKeys/key-name
 Example: projects/playground-jliauw/locations/europe-west4/keyRings/europe-west4-generic/cryptoKeys/generic-key
 
-***Grant usergroup or user permission to use kms encrypt***
+***Grant usergroup or user permission to use kms encrypt (cryptoKeyEncrypter)***
 resource "google_project_iam_member" "kms" {
   project = var.gcp_project_id
   role    = "roles/cloudkms.cryptoKeyEncrypter"
@@ -50,7 +50,17 @@ resource "google_project_iam_member" "kms" {
   
 }
 
-Cloud KMS resource location will be something like: project-name/locations/europe-west4/keyRings/europe-west4-generic/cryptoKeys/generic-key
+***Grant user group permission to decrypt (cryptoKeyDecrypter) data with KMS***
+
+resource "google_project_iam_member" "kms-decrypt" {
+  project = var.gcp_project_id
+  role    = "roles/cloudkms.cryptoKeyDecrypter"
+  member  = "user:jliauw@xebia.com"
+  # member  = "group:name-of-group@domain.com"
+
+}
+
+Cloud KMS resource location will be something like: projects/playground-jliauw/locations/europe-west4/keyRings/europe-west4-generic/cryptoKeys/generic-key
 
 ***Encrypt your secret with Cloud KMS***
 

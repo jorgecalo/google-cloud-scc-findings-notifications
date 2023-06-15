@@ -6,18 +6,6 @@
 # Enable APIs - Enable required APIs for deployment
 ###############################################################################
 
-resource "google_project_service" "compute" {
-  service                    = "compute.googleapis.com"
-  disable_dependent_services = false
-  disable_on_destroy         = false
-}
-
-resource "google_project_service" "service_networking" {
-  service                    = "servicenetworking.googleapis.com"
-  disable_dependent_services = false
-  disable_on_destroy         = false
-}
-
 resource "google_project_service" "cloudkms" {
   service            = "cloudkms.googleapis.com"
   disable_on_destroy = false
@@ -51,3 +39,13 @@ resource "google_project_iam_member" "kms" {
   # member  = "group:name-of-group@domain.com"
 
 }
+
+# # Grant user group permission to decrypt data with KMS
+
+# resource "google_project_iam_member" "kms-decrypt" {
+#   project = var.gcp_project_id
+#   role    = "roles/cloudkms.cryptoKeyDecrypter"
+#   member  = "user:jliauw@xebia.com"
+#   # member  = "group:name-of-group@domain.com"
+
+# }
