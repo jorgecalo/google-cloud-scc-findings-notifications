@@ -163,7 +163,7 @@ Fill in `terraform.tfvars`:
 - `slack_channel`, preferably the channel ID.
 
 > [!IMPORTANT]
-> The decrypted token is stored in Terraform state. Configure the commented `gcs` backend in [infra/versions.tf](infra/versions.tf) on a bucket with restricted access before the first apply.
+> The token is encrypted in your Terraform code and variables, but Terraform stores the decrypted token in state. Configure the commented `gcs` backend in [infra/versions.tf](infra/versions.tf) on a bucket with restricted access before the first apply.
 
 Then deploy:
 
@@ -310,8 +310,8 @@ Any change to the source code changes the zip hash, so `terraform apply` rebuild
 
 ## 🔐 Security considerations
 
-- **Terraform state holds the plaintext token.** Use a remote backend with restricted access.
-- **The repository holds only ciphertext.** The token can be decrypted only by identities with `cryptoKeyDecrypter` on the key.
+- **The token is encrypted in the Terraform code.** The repository and `terraform.tfvars` hold only KMS ciphertext. Only identities with `cryptoKeyDecrypter` on the key can decrypt it.
+- **Terraform state still holds the plaintext token.** Terraform decrypts the ciphertext during apply and saves the result in state. Saved plan files from `terraform plan -out` contain it too. Use a remote backend with restricted access, and treat saved plan files as secrets.
 - **The function is internal only.** Ingress is `ALLOW_INTERNAL_ONLY`, and only the trigger service account may invoke it.
 - **Findings may be sensitive.** Post them to a private channel with a limited audience.
 
