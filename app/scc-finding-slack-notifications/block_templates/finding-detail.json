@@ -10,7 +10,7 @@
         "type": "section",
         "text": {
             "type": "mrkdwn",
-            "text": "*Project*: <PROJECT_ID>\n*Severity*: *<SEVERITY>* <SEV_EMO>\n*State*: <STATE>\n*When*: <TIMESTAMP>"
+            "text": "*Project*: <PROJECT_ID>\n*Resource*: <RESOURCE>\n*Severity*: *<SEVERITY>* <SEV_EMO>\n*State*: <STATE>\n*Event time*: <TIMESTAMP>"
         },
         "accessory": {
             "type": "button",

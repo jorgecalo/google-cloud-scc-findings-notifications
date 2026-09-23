@@ -1,125 +1,375 @@
-# Cloud Function code that listens to a Pub/Sub Topic, where the Security Command Center API publishes messages 
-# about Findings with a critical and high severity. 
-# The Cloud Function code picks up the message and publish it to a Slack channel #security-gcp-alerts”.
-# Runtime: Python 3.8 and the Entrypoint should be defined as: send_slack_chat_notification
+"""Security Command Center (SCC) finding notifications to Slack.
+
+Cloud Run function (2nd gen) triggered by Eventarc when SCC publishes a
+finding notification to the Pub/Sub topic. The function formats the finding
+with a Slack Block Kit template and posts it with chat.postMessage.
+
+Runtime: Python 3.13. Entry point: send_slack_chat_notification
+
+Environment variables:
+  SLACK_BOT_TOKEN        Slack bot token. Injected from Secret Manager.
+  SLACK_CHANNEL          Channel ID (recommended) or name to post to.
+  ALLOWED_PROJECTS       Optional comma separated list of project IDs or
+                         display names. When set, other projects are skipped.
+  MAX_EVENT_AGE_SECONDS  Events older than this are dropped instead of being
+                         retried forever. Default 3600.
+
+Error handling:
+  Transient errors (network, HTTP 429/5xx, Slack internal errors) raise, so
+  Eventarc redelivers the event. Permanent errors (bad payload, invalid token,
+  unknown channel, invalid blocks) are logged with severity ERROR and the
+  event is acknowledged, so it is not retried.
+"""
 
 import base64
+import copy
 import json
 import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import quote
+
 import requests
 
-from google.cloud import logging
-from google.cloud import secretmanager
+try:
+    import functions_framework
+except ImportError:  # Allows the local dry run without the framework.
+    functions_framework = None
 
-def get_secret(secret_id="sccnotifier-slack-bot-token", version_id="latest"):
-    client = secretmanager.SecretManagerServiceClient()
-    name = f"projects/[INSERT-PROJECT-ID]/secrets/{secret_id}/versions/{version_id}"
-    request = secretmanager.AccessSecretVersionRequest(name=name)
-    # print(client.access_secret_version(request=request).payload.data.decode("utf-8"))
-    return client.access_secret_version(request=request).payload.data.decode("utf-8")
+SLACK_API_URL = "https://slack.com/api/chat.postMessage"
+SLACK_SECTION_TEXT_LIMIT = 3000
+SLACK_TIMEOUT_SECONDS = 10
+CONSOLE_FINDINGS_URL = "https://console.cloud.google.com/security/command-center/findings"
+TEMPLATE_PATH = Path(__file__).parent / "block_templates" / "finding-detail.json"
+
+PLACEHOLDER_KEYS = (
+    "SUBJECT", "WEB_LINK", "PROJECT_ID", "RESOURCE", "SEVERITY", "SEV_EMO",
+    "STATE", "TIMESTAMP", "EXPLANATION", "RECOMMENDATION", "INSTRUCT",
+)
 
 
-def message_post(data):
-    # pprint.pprint(payload)
-    token = str(get_secret("sccnotifier-slack-bot-token"))
-    channel_id = "security-gcp-alerts"
-    payload = data if type(data) is dict else json.loads(data)
+SEVERITY_EMOJI = {"CRITICAL": ":rotating_light:", "HIGH": ":warning:"}
 
-    url = 'https://slack.com/api/chat.postMessage'
-    headers = {
-        'Authorization': 'Bearer ' + token,
-        'Content-Type': 'application/json; charset=utf-8'
+# Slack API errors worth retrying. Everything else is treated as permanent.
+TRANSIENT_SLACK_ERRORS = {
+    "ratelimited",
+    "internal_error",
+    "fatal_error",
+    "service_unavailable",
+    "request_timeout",
+}
+
+_template_cache = None
+
+
+class TransientError(Exception):
+    """Raised to make Eventarc redeliver the event."""
+
+
+class PermanentError(Exception):
+    """The event can never succeed. It is logged and acknowledged."""
+
+
+def log(severity, message, **fields):
+    """Write a structured log line that Cloud Logging parses from stdout."""
+    print(json.dumps({"severity": severity, "message": message, **fields}), flush=True)
+
+
+# --------------------------------------------------------------------------
+# Parsing
+# --------------------------------------------------------------------------
+
+def parse_pubsub_message(event_data):
+    """Return the SCC notification dict from an Eventarc Pub/Sub event body."""
+    try:
+        encoded = event_data["message"]["data"]
+        return json.loads(base64.b64decode(encoded).decode("utf-8"))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise PermanentError(f"Cannot decode Pub/Sub message: {exc}") from exc
+
+
+def event_age_seconds(event_time, now=None):
+    """Age of an RFC 3339 timestamp in seconds, or None when unparsable."""
+    if not event_time:
+        return None
+    try:
+        ts = datetime.fromisoformat(str(event_time).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    return (now - ts).total_seconds()
+
+
+def allowed_projects():
+    raw = os.environ.get("ALLOWED_PROJECTS", "")
+    return {p.strip() for p in raw.split(",") if p.strip()}
+
+
+def project_identifiers(resource):
+    """All values a user may use to name the finding's project."""
+    ids = set()
+    for key in ("projectDisplayName", "project"):
+        value = resource.get(key)
+        if value:
+            ids.add(value)
+            ids.add(value.rsplit("/", 1)[-1])
+    return ids
+
+
+def should_notify(notification):
+    """Apply the optional project allowlist. SCC already filters severity."""
+    allow = allowed_projects()
+    if not allow:
+        return True
+    return bool(project_identifiers(notification.get("resource") or {}) & allow)
+
+
+# --------------------------------------------------------------------------
+# Formatting
+# --------------------------------------------------------------------------
+
+def escape_mrkdwn(text):
+    """Escape the three characters Slack treats as control characters."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def as_text(value):
+    """Turn a sourceProperties value into display text. Empty becomes None."""
+    if value is None or value == "" or value == {} or value == []:
+        return None
+    if isinstance(value, str):
+        return value.strip() or None
+    return json.dumps(value, ensure_ascii=False)
+
+
+def truncate(text, limit):
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def console_url(finding_name):
+    """Deep link to the finding in the Google Cloud console.
+
+    Works for organization, folder and project level SCC activations and for
+    both v1 and v2 finding names.
+    """
+    parts = (finding_name or "").split("/")
+    if len(parts) < 2:
+        return CONSOLE_FINDINGS_URL
+    scope, scope_id = parts[0], parts[1]
+    resource_id = quote(finding_name, safe="/")
+    if scope == "organizations":
+        return (f"{CONSOLE_FINDINGS_URL}?organizationId={scope_id}&orgonly=true"
+                f"&supportedpurview=organizationId&resourceId={resource_id}")
+    if scope == "folders":
+        return (f"{CONSOLE_FINDINGS_URL}?folder={scope_id}"
+                f"&supportedpurview=folder&resourceId={resource_id}")
+    if scope == "projects":
+        return (f"{CONSOLE_FINDINGS_URL}?project={scope_id}"
+                f"&supportedpurview=project&resourceId={resource_id}")
+    return CONSOLE_FINDINGS_URL
+
+
+def finding_values(notification):
+    """Extract the display values for the template from a notification.
+
+    Values are Slack escaped. A value of None removes the block that uses it.
+    """
+    finding = notification.get("finding") or {}
+    resource = notification.get("resource") or {}
+    props = finding.get("sourceProperties") or {}
+
+    severity = finding.get("severity") or "SEVERITY_UNSPECIFIED"
+    project = (resource.get("projectDisplayName")
+               or (resource.get("project") or "").rsplit("/", 1)[-1]
+               or "n/a")
+    resource_label = (resource.get("displayName")
+                      or resource.get("name")
+                      or finding.get("resourceName")
+                      or "n/a")
+
+    # Security Health Analytics uses sourceProperties. Threat detection
+    # services and newer detectors use description and nextSteps instead.
+    explanation = as_text(props.get("Explanation")) or as_text(finding.get("description"))
+    recommendation = as_text(props.get("Recommendation")) or as_text(finding.get("nextSteps"))
+    instructions = as_text(props.get("ExceptionInstructions"))
+
+    def esc(value):
+        return None if value is None else escape_mrkdwn(value)
+
+    return {
+        "SUBJECT": esc(finding.get("category") or "Unknown category"),
+        "WEB_LINK": console_url(finding.get("name")),
+        "PROJECT_ID": esc(project),
+        "RESOURCE": esc(resource_label),
+        "SEVERITY": esc(severity),
+        "SEV_EMO": SEVERITY_EMOJI.get(severity, ""),
+        "STATE": esc(finding.get("state") or "n/a"),
+        "TIMESTAMP": esc(finding.get("eventTime") or finding.get("createTime") or "n/a"),
+        "EXPLANATION": esc(explanation),
+        "RECOMMENDATION": esc(recommendation),
+        # Quoted security mark names read better as inline code.
+        "INSTRUCT": esc(instructions.replace('"', "`")) if instructions else None,
     }
+
+
+def load_template():
+    global _template_cache
+    if _template_cache is None:
+        with TEMPLATE_PATH.open("rt", encoding="utf-8") as fh:
+            _template_cache = json.load(fh)
+    return copy.deepcopy(_template_cache)
+
+
+def _placeholders_in(obj):
+    text = json.dumps(obj)
+    return {key for key in PLACEHOLDER_KEYS if f"<{key}>" in text}
+
+
+def _fill(obj, values):
+    if isinstance(obj, dict):
+        return {k: _fill(v, values) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_fill(v, values) for v in obj]
+    if isinstance(obj, str):
+        for key, value in values.items():
+            obj = obj.replace(f"<{key}>", value or "")
+        return obj
+    return obj
+
+
+def build_blocks(notification, template=None):
+    """Return Slack blocks for the notification.
+
+    Blocks that only exist to show a missing value are dropped, and every
+    section text is kept within Slack's 3000 character limit.
+    """
+    template = template if template is not None else load_template()
+    values = finding_values(notification)
+    optional = {k for k, v in values.items() if v is None}
+
+    blocks = []
+    for block in template:
+        if _placeholders_in(block) & optional:
+            continue
+        filled = _fill(block, values)
+        text = filled.get("text")
+        if isinstance(text, dict) and isinstance(text.get("text"), str):
+            text["text"] = truncate(text["text"], SLACK_SECTION_TEXT_LIMIT)
+        blocks.append(filled)
+    return blocks
+
+
+def fallback_text(notification):
+    """Plain text used for push notifications and screen readers."""
+    finding = notification.get("finding") or {}
+    resource = notification.get("resource") or {}
+    return (f"{finding.get('severity', 'New')} SCC finding "
+            f"{finding.get('category', '')} in "
+            f"{resource.get('projectDisplayName', 'unknown project')}")
+
+
+# --------------------------------------------------------------------------
+# Slack
+# --------------------------------------------------------------------------
+
+def post_to_slack(blocks, text, token, channel, session=requests):
+    """Post a message. Raises TransientError or PermanentError on failure."""
     try:
-        with open("block_templates/finding-detail.json", "rt") as block_f:
-            block_template = json.load(block_f)
-        # template_content
-        merge_template(block_template, payload)
+        response = session.post(
+            SLACK_API_URL,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json; charset=utf-8",
+            },
+            data=json.dumps({
+                "channel": channel,
+                "blocks": blocks,
+                "text": text,
+                "unfurl_links": False,
+                "unfurl_media": False,
+            }),
+            timeout=SLACK_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException as exc:
+        raise TransientError(f"Slack request failed: {exc}") from exc
 
-        params = {
-            "channel": channel_id,
-            "blocks": block_template,
-            "text": "Alternate content from block content",
-            "unfurl_links": "false"
-        }
-        r = requests.post(url, data=json.dumps(params), headers=headers)
-        if r.status_code != 200:
-            raise ValueError(f"Request to Slack returned error \
-                {r.status_code}. Response is: {r.text}")
-        # print(r.text)
+    if response.status_code == 429 or response.status_code >= 500:
+        raise TransientError(f"Slack returned HTTP {response.status_code}")
+    try:
+        body = response.json()
+    except ValueError as exc:
+        raise TransientError(f"Slack returned non JSON, HTTP {response.status_code}") from exc
 
-    except Exception as e:
-        print(f"Error occurred attempting to post message. Error is: {e}")
+    # Slack answers HTTP 200 for most errors, so the ok flag is authoritative.
+    if not body.get("ok"):
+        error = body.get("error", "unknown_error")
+        detail = {"slack_error": error,
+                  "response_metadata": body.get("response_metadata")}
+        if error in TRANSIENT_SLACK_ERRORS:
+            raise TransientError(f"Slack error {error}: {detail}")
+        raise PermanentError(f"Slack error {error}: {detail}")
+    return body
 
-def merge_template(list_data, payload):
-    finding = payload.get("finding")
-    resource = payload.get("resource")
-    props = finding.get("sourceProperties")
 
-    org_id = finding.get("name").split("/")[1]
-    finding_id = finding.get("name").split("/")[-1]
-    source_id = finding.get("name").split("/")[3]
-    severity = finding.get("severity")
-    sev_emo = ":warning:" if "HIGH" in severity else ""
+def handle_notification(notification, token=None, channel=None, session=requests):
+    """Format and send one SCC notification. Returns False when skipped."""
+    finding = notification.get("finding") or {}
+    if not should_notify(notification):
+        log("INFO", "Finding skipped by ALLOWED_PROJECTS",
+            finding=finding.get("name"))
+        return False
 
-    url = "https://console.cloud.google.com/security/command-center/findings"
-    url += f"?organizations/{org_id}/sources/{source_id}/"
-    url += f"findings/{finding_id}=,true&orgonly=true"
-    url += f"&organizationId={org_id}&supportedpurview=organizationId"
-    url += "&view_type=vt_finding_type&vt_finding_type=All"
-    url += f"&resourceId=organizations/{org_id}/sources/{source_id}/"
-    url += f"findings/{finding_id}"
-    # pprint.pprint(url)
+    token = token or os.environ.get("SLACK_BOT_TOKEN")
+    channel = channel or os.environ.get("SLACK_CHANNEL")
+    if not token or not channel:
+        raise PermanentError("SLACK_BOT_TOKEN and SLACK_CHANNEL must be set")
 
-    list_data[0]["text"]["text"] = list_data[0]["text"]["text"] \
-        .replace("<SUBJECT>", finding.get("category")) \
-        .replace("<WEB_LINK>", url)
+    post_to_slack(build_blocks(notification), fallback_text(notification),
+                  token.strip(), channel, session=session)
+    log("INFO", "Finding posted to Slack", finding=finding.get("name"),
+        category=finding.get("category"),
+        finding_severity=finding.get("severity"))
+    return True
 
-    list_data[1]["text"]["text"] = list_data[1]["text"]["text"] \
-        .replace("<PROJECT_ID>", str(resource.get("projectDisplayName"))) \
-        .replace("<SEVERITY>", severity) \
-        .replace("<SEV_EMO>", sev_emo) \
-        .replace("<STATE>", finding.get("state")) \
-        .replace("<TIMESTAMP>", finding.get("createTime"))
 
-    list_data[1]["accessory"]["url"] = list_data[1]["accessory"]["url"] \
-        .replace("<WEB_LINK>", url)
-
-    explain = format_text(json.dumps(props.get("Explanation")), False)
-    list_data[2]["text"]["text"] = list_data[2]["text"]["text"] \
-        .replace("<EXPLANATION>", explain)
-
-    recommend = format_text(json.dumps(props.get("Recommendation")), False)
-    list_data[3]["text"]["text"] = list_data[3]["text"]["text"] \
-        .replace("<RECOMMENDATION>", recommend)
-
-    # instruct = format_text(json.dumps())
-    instr = format_text(json.dumps(props.get("ExceptionInstructions")), True)
-    list_data[4]["text"]["text"] = list_data[4]["text"]["text"] \
-        .replace("<INSTRUCT>", instr)
-
-def format_text(val, text2CodeBlocks: bool = False):
-    val = val.replace("\\", "")
-    val = val[1:] if val.startswith('"') else val
-    val = val[:-1] if val.endswith('"') else val
-    if text2CodeBlocks is True:
-        val = val.replace('"', '`')
-    return val
-
-def send_slack_chat_notification (event, context):
-    CUSTOM_LOG_NAME = "scc_notifications_log"
-    logging_client = logging.Client()
-    logger = logging_client.logger(CUSTOM_LOG_NAME)
-    # logger = logging_client.logger()
+def _entry_point(cloud_event):
+    max_age = int(os.environ.get("MAX_EVENT_AGE_SECONDS", "3600"))
+    age = event_age_seconds(cloud_event["time"])
+    if age is not None and age > max_age:
+        log("ERROR", "Dropping event older than MAX_EVENT_AGE_SECONDS",
+            event_id=cloud_event["id"], age_seconds=int(age))
+        return
 
     try:
-        # PubSub messages come in encrypted
-        payload = base64.b64decode(event['data']).decode('utf-8')
-        message_post(payload)
-    except Exception as e:
-        logger.log(f"Oops! {e}")
+        notification = parse_pubsub_message(cloud_event.data)
+        handle_notification(notification)
+    except PermanentError as exc:
+        # Acknowledge: retrying cannot fix this. Alert on this log line.
+        log("ERROR", f"Permanent failure, event not retried: {exc}",
+            event_id=cloud_event["id"])
+    except TransientError as exc:
+        log("WARNING", f"Transient failure, event will be retried: {exc}",
+            event_id=cloud_event["id"])
+        raise
+
+
+if functions_framework is not None:
+    send_slack_chat_notification = functions_framework.cloud_event(_entry_point)
+else:
+    send_slack_chat_notification = _entry_point
+
 
 if __name__ == "__main__":
-    with open("app/payload_test.json", "rt") as testdata_f:
-        testdata = json.load(testdata_f)
-    message_post(testdata)
+    # Local dry run: python main.py path/to/notification.json [--send]
+    # Prints the Slack blocks. With --send it also posts them, using the
+    # SLACK_BOT_TOKEN and SLACK_CHANNEL environment variables.
+    if len(sys.argv) < 2:
+        sys.exit("usage: python main.py <notification.json> [--send]")
+    with open(sys.argv[1], "rt", encoding="utf-8") as fh:
+        sample = json.load(fh)
+    print(json.dumps(build_blocks(sample), indent=2, ensure_ascii=False))
+    if "--send" in sys.argv[2:]:
+        handle_notification(sample)

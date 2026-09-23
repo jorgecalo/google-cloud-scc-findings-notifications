@@ -1,205 +1,254 @@
 #------------------------------------------------------------------------------
-# Google Cloud Security Command Center finding notifications to Slack v1.1.0
+# Google Cloud Security Command Center finding notifications to Slack v2.0.0
+# Stage 2: apply after the kms module in ./kms.
 #------------------------------------------------------------------------------
 
+data "google_project" "this" {
+  project_id = var.project_id
+}
+
 ###############################################################################
-# Enable APIs - Enable required APIs for deployment
+# Enable required APIs
 ###############################################################################
 
-resource "google_project_service" "cloudresourcemanager" {
-  service                    = "cloudresourcemanager.googleapis.com"
-  disable_dependent_services = false
-  disable_on_destroy         = false
+locals {
+  services = toset([
+    "artifactregistry.googleapis.com",
+    "cloudbuild.googleapis.com",
+    "cloudfunctions.googleapis.com",
+    "cloudkms.googleapis.com",
+    "cloudresourcemanager.googleapis.com",
+    "eventarc.googleapis.com",
+    "iam.googleapis.com",
+    "logging.googleapis.com",
+    "pubsub.googleapis.com",
+    "run.googleapis.com",
+    "secretmanager.googleapis.com",
+    "securitycenter.googleapis.com",
+    "storage.googleapis.com",
+  ])
+
+  pubsub_service_agent = "serviceAccount:service-${data.google_project.this.number}@gcp-sa-pubsub.iam.gserviceaccount.com"
 }
 
-resource "google_project_service" "storage" {
-  service                    = "storage.googleapis.com"
-  disable_dependent_services = false
-  disable_on_destroy         = false
-}
-
-resource "google_project_service" "compute" {
-  service                    = "compute.googleapis.com"
-  disable_dependent_services = false
-  disable_on_destroy         = false
-}
-
-resource "google_project_service" "service_networking" {
-  service                    = "servicenetworking.googleapis.com"
-  disable_dependent_services = false
-  disable_on_destroy         = false
-}
-
-resource "google_project_service" "secretmanager" {
-  service            = "secretmanager.googleapis.com"
+resource "google_project_service" "services" {
+  for_each           = local.services
+  project            = var.project_id
+  service            = each.value
   disable_on_destroy = false
 }
 
 ###############################################################################
-# Deployment of required resource for running SCC to Slack source code
+# Pub/Sub topic and SCC notification config
 ###############################################################################
 
-# Create Pubsub topic. SCC will publish the findings on this topic. Defined project in resource.
 resource "google_pubsub_topic" "sccfindings" {
-  name    = "scc-findingsnotifier-topic"
-  project = var.gcp_project_id
+  project = var.project_id
+  name    = var.topic_name
+
   message_storage_policy {
-    allowed_persistence_regions = [
-      "europe-west1",
-      "europe-west4",
-    ]
+    allowed_persistence_regions = var.pubsub_allowed_persistence_regions
   }
+
+  depends_on = [google_project_service.services]
 }
 
-resource "google_scc_notification_config" "custom_notification_config" {
-  config_id    = "security-scc-notify-config"
-  organization = var.gcp_org_id
-  description  = "Security team Custom Cloud SCC Finding Notification Configuration"
+# SCC v2 API. Configs created with v1 are not visible in v2, so delete any
+# existing v1 config with the same purpose to avoid duplicate Slack messages.
+resource "google_scc_v2_organization_notification_config" "slack" {
+  config_id    = var.notification_config_id
+  organization = var.org_id
+  location     = "global"
+  description  = "Sends active, unmuted high and critical SCC findings to Slack"
   pubsub_topic = google_pubsub_topic.sccfindings.id
 
   streaming_config {
-    filter = "severity = \"HIGH\" OR severity= \"CRITICAL\" AND state = \"ACTIVE\""
-    #HERE YOU CAN FILTER ON PROJECTS WHICH TO INCLUDE. Figure out the filtering for multiple projects AND "..."
-    # projects = [
-    #      "project-1", 
-    #      "project-2", 
-    #      "project-3", 
-    #      "project-4"
-    #]
-
-  }
-}
-
-# Create pubsub subscription that notifies Cloud Function.
-resource "google_pubsub_subscription" "sccfinding-cf-sub" {
-  project = var.gcp_project_id
-  name    = "sccfinding-subscription"
-  topic   = google_pubsub_topic.sccfindings.name
-
-  # 20 minutes
-  message_retention_duration = "1200s"
-  retain_acked_messages      = true
-
-  ack_deadline_seconds = 20
-
-  expiration_policy {
-    ttl = "300000.5s"
-  }
-  retry_policy {
-    minimum_backoff = "10s"
+    filter = var.notification_filter
   }
 
-  enable_message_ordering = false
+  depends_on = [google_project_service.services]
 }
 
-#Create Google Storage bucket that will host source code in region Europe West1
-resource "random_id" "bucket_prefix" {
-  byte_length = 8
-}
+###############################################################################
+# Service accounts and IAM
+###############################################################################
 
-resource "google_storage_bucket" "function_bucket" {
-  project  = var.gcp_project_id
-  name     = "${random_id.bucket_prefix.hex}-var.gcp_cloudstorage_name_bucket"
-  location = var.gcp_region
-}
-
-#Generate an archive of the source code compressed as a .zip file. Source is stored in the Terraform directory /app/
-data "archive_file" "source" {
-  type        = "zip"
-  source_dir  = "${path.root}/../app/scc-finding-slack-notifications"
-  output_path = "${path.root}/../cf-scc-notification.zip"
-}
-
-# Add source code zip to bucket
-resource "google_storage_bucket_object" "zip" {
-  # Append file MD5 to force bucket to be recreated
-  name         = "cf-scc-notification.zip"
-  bucket       = google_storage_bucket.function_bucket.name
-  source       = data.archive_file.source.output_path
-  content_type = "application/zip"
-}
-
-# Create Cloud Function with Python Runtime.
-resource "google_cloudfunctions_function" "cf" {
-  project               = var.gcp_project_id
-  region                = var.gcp_region
-  name                  = "scc-slack-notifier"
-  description           = "Security Command Center findings notifier to Slack"
-  runtime               = "python310"
-  service_account_email = google_service_account.sccnotifier.email
-
-  timeout             = 540
-  available_memory_mb = 256
-  max_instances       = 1
-  ingress_settings    = "ALLOW_INTERNAL_AND_GCLB"
-
-  environment_variables = {
-    SLACK_BOT_TOKEN = format("%s/versions/latest", google_secret_manager_secret.slack_bot_token.id)
-  }
-
-  source_archive_bucket = google_storage_bucket.function_bucket.name
-  source_archive_object = google_storage_bucket_object.zip.name
-
-  event_trigger {
-    event_type = "providers/cloud.pubsub/eventTypes/topic.publish"
-    resource   = google_pubsub_topic.sccfindings.id
-    failure_policy {
-      retry = true
-    }
-
-  }
-
-  entry_point = "send_slack_chat_notification"
-}
-
-#Create Service Account. Defined project in resource.
+# Runtime identity of the function and identity of the Eventarc trigger.
 resource "google_service_account" "sccnotifier" {
-  project      = var.gcp_project_id
-  display_name = "The sccnotifier service"
+  project      = var.project_id
   account_id   = "sccnotifier"
+  display_name = "SCC to Slack notifier runtime"
 }
 
-#Add role IAM ServiceAccountUser to created Service Account.
-resource "google_service_account_iam_member" "sccnotifier_service_account_user_sccnotifier" {
+# Identity used by Cloud Build to build the function.
+resource "google_service_account" "build" {
+  project      = var.project_id
+  account_id   = "sccnotifier-build"
+  display_name = "SCC to Slack notifier build"
+}
+
+resource "google_project_iam_member" "build_builder" {
+  project = var.project_id
+  role    = "roles/cloudbuild.builds.builder"
+  member  = google_service_account.build.member
+}
+
+resource "google_project_iam_member" "trigger_event_receiver" {
+  project = var.project_id
+  role    = "roles/eventarc.eventReceiver"
+  member  = google_service_account.sccnotifier.member
+}
+
+# Lets Pub/Sub mint tokens for authenticated push to the function. Needed for
+# projects created before April 2021, harmless for newer projects.
+resource "google_service_account_iam_member" "pubsub_token_creator" {
   service_account_id = google_service_account.sccnotifier.name
-  member             = format("serviceAccount:%s", google_service_account.sccnotifier.email)
-  role               = "roles/iam.serviceAccountUser"
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = local.pubsub_service_agent
+
+  depends_on = [google_project_service.services]
 }
 
-# Create Secret Manager resource for Slack Bot token. Defined project in resource.
+# The trigger identity may invoke only this function's Cloud Run service.
+resource "google_cloud_run_v2_service_iam_member" "trigger_invoker" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloudfunctions2_function.cf.name
+  role     = "roles/run.invoker"
+  member   = google_service_account.sccnotifier.member
+}
+
+###############################################################################
+# Slack bot token in Secret Manager
+###############################################################################
+
+data "google_kms_secret" "slack_bot_token" {
+  crypto_key = var.kms_crypto_key_id
+  ciphertext = var.slack_bot_token_ciphertext
+}
+
 resource "google_secret_manager_secret" "slack_bot_token" {
-  project   = var.gcp_project_id
+  project   = var.project_id
   secret_id = "sccnotifier-slack-bot-token"
+
   replication {
     user_managed {
-      replicas {
-        location = var.gcp_region
-      }
-      replicas {
-        location = var.gcp_region-2
+      dynamic "replicas" {
+        for_each = var.secret_replica_locations
+        content {
+          location = replicas.value
+        }
       }
     }
-
   }
-}
 
-#Secret Manager grant access right to secret.
-resource "google_secret_manager_secret_iam_binding" "slack_bot_token" {
-  role      = "roles/secretmanager.secretAccessor"
-  secret_id = google_secret_manager_secret.slack_bot_token.id
-  members = [
-    format("serviceAccount:%s", google_service_account.sccnotifier.email)
-  ]
+  depends_on = [google_project_service.services]
 }
 
 resource "google_secret_manager_secret_version" "slack_bot_token" {
   secret      = google_secret_manager_secret.slack_bot_token.id
   secret_data = data.google_kms_secret.slack_bot_token.plaintext
-
 }
 
-data "google_kms_secret" "slack_bot_token" {
-  #  ## Token Slack bot for Workspace and GCP-SCC-Finding-Notifier app. Ciphertext should be a single line string.
-  crypto_key = "projects/playground-jliauw/locations/europe-west4/keyRings/europe-west4-generic/cryptoKeys/generic-key"
-  ciphertext = "CiQAjpCQLhps3Gqy26V7Xu4ZlcKOZugIuCh50mIpBfpqjpJy3qYSXwDtWIZHNEuzWNTPS9/k62VzJNW7dOn6XRI/o47el2nsMK939X/cdRBJtCnO//uHT9dBFkIN343IixndZZrViD7IqDklgygkh51z6i2K2l5HcSxGHRnzutisGaQAAKLs"
+resource "google_secret_manager_secret_iam_member" "slack_bot_token" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.slack_bot_token.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = google_service_account.sccnotifier.member
+}
+
+###############################################################################
+# Function source
+###############################################################################
+
+resource "random_id" "bucket_suffix" {
+  byte_length = 4
+}
+
+resource "google_storage_bucket" "function_source" {
+  project                     = var.project_id
+  name                        = "${var.project_id}-scc-notifier-src-${random_id.bucket_suffix.hex}"
+  location                    = var.region
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+  force_destroy               = true
+
+  depends_on = [google_project_service.services]
+}
+
+data "archive_file" "source" {
+  type        = "zip"
+  source_dir  = "${path.module}/../app/scc-finding-slack-notifications"
+  output_path = "${path.module}/.build/function-source.zip"
+  excludes    = ["__pycache__", "**/__pycache__/**", "**/*.pyc", ".venv", "**/.venv/**"]
+}
+
+# The MD5 in the object name makes every code change redeploy the function.
+resource "google_storage_bucket_object" "source" {
+  name         = "function-source-${data.archive_file.source.output_md5}.zip"
+  bucket       = google_storage_bucket.function_source.name
+  source       = data.archive_file.source.output_path
+  content_type = "application/zip"
+}
+
+###############################################################################
+# Cloud Run function (2nd gen)
+###############################################################################
+
+resource "google_cloudfunctions2_function" "cf" {
+  project     = var.project_id
+  location    = var.region
+  name        = var.function_name
+  description = "Security Command Center findings notifier to Slack"
+
+  build_config {
+    runtime         = var.function_runtime
+    entry_point     = "send_slack_chat_notification"
+    service_account = google_service_account.build.id
+
+    source {
+      storage_source {
+        bucket = google_storage_bucket.function_source.name
+        object = google_storage_bucket_object.source.name
+      }
+    }
+  }
+
+  service_config {
+    available_memory               = "256M"
+    timeout_seconds                = 60
+    max_instance_count             = var.max_instance_count
+    ingress_settings               = "ALLOW_INTERNAL_ONLY"
+    all_traffic_on_latest_revision = true
+    service_account_email          = google_service_account.sccnotifier.email
+
+    environment_variables = {
+      SLACK_CHANNEL         = var.slack_channel
+      ALLOWED_PROJECTS      = join(",", var.allowed_projects)
+      MAX_EVENT_AGE_SECONDS = tostring(var.max_event_age_seconds)
+    }
+
+    secret_environment_variables {
+      key        = "SLACK_BOT_TOKEN"
+      project_id = var.project_id
+      secret     = google_secret_manager_secret.slack_bot_token.secret_id
+      version    = "latest"
+    }
+  }
+
+  event_trigger {
+    trigger_region        = var.region
+    event_type            = "google.cloud.pubsub.topic.v1.messagePublished"
+    pubsub_topic          = google_pubsub_topic.sccfindings.id
+    retry_policy          = "RETRY_POLICY_RETRY"
+    service_account_email = google_service_account.sccnotifier.email
+  }
+
+  depends_on = [
+    google_project_service.services,
+    google_project_iam_member.build_builder,
+    google_project_iam_member.trigger_event_receiver,
+    google_secret_manager_secret_iam_member.slack_bot_token,
+    google_secret_manager_secret_version.slack_bot_token,
+  ]
 }
