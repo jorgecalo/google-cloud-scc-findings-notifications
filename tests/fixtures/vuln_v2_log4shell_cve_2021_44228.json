@@ -1,0 +1,54 @@
+{
+  "notificationConfigName": "organizations/123456789012/locations/global/notificationConfigs/scc-slack-notifier",
+  "finding": {
+    "name": "organizations/123456789012/sources/4444444444444444444/locations/global/findings/log4shell202144228finding01",
+    "canonicalName": "projects/222222222222/sources/4444444444444444444/locations/global/findings/log4shell202144228finding01",
+    "parent": "organizations/123456789012/sources/4444444444444444444/locations/global",
+    "resourceName": "//compute.googleapis.com/projects/example-project-01/zones/europe-west1-b/instances/java-api-prod-01",
+    "state": "ACTIVE",
+    "category": "SOFTWARE_VULNERABILITY",
+    "severity": "CRITICAL",
+    "findingClass": "VULNERABILITY",
+    "mute": "UNMUTED",
+    "eventTime": "2026-09-25T16:50:00.000Z",
+    "createTime": "2026-09-25T16:50:01.000Z",
+    "vulnerability": {
+      "cve": {
+        "id": "CVE-2021-44228",
+        "exploitationActivity": "WIDE",
+        "impact": "CRITICAL",
+        "observedInTheWild": true,
+        "zeroDay": false,
+        "upstreamFixAvailable": true,
+        "cvssv3": {
+          "baseScore": 10.0,
+          "attackVector": "ATTACK_VECTOR_NETWORK",
+          "attackComplexity": "ATTACK_COMPLEXITY_LOW",
+          "privilegesRequired": "PRIVILEGES_REQUIRED_NONE",
+          "userInteraction": "USER_INTERACTION_NONE",
+          "scope": "SCOPE_CHANGED",
+          "confidentialityImpact": "IMPACT_HIGH",
+          "integrityImpact": "IMPACT_HIGH",
+          "availabilityImpact": "IMPACT_HIGH"
+        }
+      },
+      "offendingPackage": {
+        "packageName": "org.apache.logging.log4j:log4j-core",
+        "version": "2.14.1"
+      },
+      "fixedPackage": {
+        "packageName": "org.apache.logging.log4j:log4j-core",
+        "version": "2.17.1"
+      }
+    }
+  },
+  "resource": {
+    "name": "//compute.googleapis.com/projects/example-project-01/zones/europe-west1-b/instances/java-api-prod-01",
+    "displayName": "java-api-prod-01",
+    "type": "google.compute.Instance",
+    "project": "//cloudresourcemanager.googleapis.com/projects/222222222222",
+    "projectDisplayName": "example-project-01",
+    "parent": "//cloudresourcemanager.googleapis.com/projects/222222222222",
+    "parentDisplayName": "example-project-01"
+  }
+}

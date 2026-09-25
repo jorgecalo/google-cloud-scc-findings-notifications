@@ -225,12 +225,12 @@ def _is_routable_ip(ip_str):
         return False
 
 
-def extract_iocs(finding, max_iocs=3):
-    """Extract up to max_iocs deduplicated IoCs [(ioc_type, value)] from an SCC finding."""
-    iocs = []
+def extract_iocs(finding, max_iocs=4):
+    """Extract up to max_iocs deduplicated IoCs [(ioc_type, value)] across IPs, domains, and hashes."""
+    ips, domains, files = [], [], []
     seen = set()
 
-    def add_ioc(ioc_type, val):
+    def add_to(bucket, ioc_type, val):
         if not val or not isinstance(val, str):
             return
         val = val.strip()
@@ -239,42 +239,48 @@ def extract_iocs(finding, max_iocs=3):
         if ioc_type == "ip_addresses" and not _is_routable_ip(val):
             return
         seen.add((ioc_type, val))
-        iocs.append((ioc_type, val))
+        bucket.append((ioc_type, val))
 
     indicator = finding.get("indicator") or {}
     for ip in indicator.get("ipAddresses") or []:
-        add_ioc("ip_addresses", ip)
+        add_to(ips, "ip_addresses", ip)
     for dom in indicator.get("domains") or []:
-        add_ioc("domains", dom)
+        add_to(domains, "domains", dom)
     for sig in indicator.get("signatures") or []:
         if isinstance(sig, dict) and sig.get("sha256"):
-            add_ioc("files", sig["sha256"])
+            add_to(files, "files", sig["sha256"])
 
     props = (finding.get("sourceProperties") or {}).get("properties") or {}
     if isinstance(props, dict):
         for key in ("ip", "ips", "ipAddress", "destinationIp"):
             val = props.get(key)
             for item in (val if isinstance(val, list) else [val]):
-                add_ioc("ip_addresses", item)
+                add_to(ips, "ip_addresses", item)
         for key in ("domain", "domains", "host"):
             val = props.get(key)
             for item in (val if isinstance(val, list) else [val]):
-                add_ioc("domains", item)
+                add_to(domains, "domains", item)
         for key in ("sha256", "fileHash"):
             val = props.get(key)
             for item in (val if isinstance(val, list) else [val]):
-                add_ioc("files", item)
+                add_to(files, "files", item)
 
     for conn in finding.get("connections") or []:
         if isinstance(conn, dict):
-            add_ioc("ip_addresses", conn.get("destinationIp"))
+            add_to(ips, "ip_addresses", conn.get("destinationIp"))
 
     for proc in finding.get("processes") or []:
         if isinstance(proc, dict):
             binary = proc.get("binary") or {}
-            add_ioc("files", binary.get("sha256"))
+            add_to(files, "files", binary.get("sha256"))
 
-    return iocs[:max_iocs]
+    # Interleave IoC types so IPs, hostnames/domains, and file hashes are all represented
+    ordered = []
+    for group in (ips[:1], domains[:1], files[:1], ips[1:], domains[1:], files[1:]):
+        for item in group:
+            if len(ordered) < max_iocs:
+                ordered.append(item)
+    return ordered
 
 
 def query_gti_ioc(ioc_type, ioc_value, api_key, session=requests):
@@ -319,9 +325,11 @@ def query_gti_ioc(ioc_type, ioc_value, api_key, session=requests):
             gti_verdict = "BENIGN / CLEAN"
 
     gui_type = {"ip_addresses": "ip-address", "domains": "domain", "files": "file"}.get(ioc_type, "search")
+    label_type = {"ip_addresses": "IP", "domains": "Hostname", "files": "SHA256"}.get(ioc_type, "IoC")
     result = {
         "ioc": ioc_value,
         "type": ioc_type,
+        "label_type": label_type,
         "verdict": gti_verdict.replace("VERDICT_", ""),
         "malicious": malicious,
         "suspicious": suspicious,
@@ -335,40 +343,137 @@ def query_gti_ioc(ioc_type, ioc_value, api_key, session=requests):
     return result
 
 
+def query_gti_cve(cve_id, api_key, session=requests):
+    """Query Google Threat Intelligence (VirusTotal v3) for a CVE vulnerability collection."""
+    norm_cve = cve_id.strip().lower()
+    cache_key = ("cve", norm_cve)
+    now = time.time()
+    cached = _gti_enrichment_cache.get(cache_key)
+    if cached and (now - cached[0]) < 3600:
+        return cached[1]
+
+    url = f"{GTI_API_BASE_URL}/collections/vulnerability--{quote(norm_cve, safe='')}"
+    try:
+        resp = session.get(
+            url,
+            headers={"x-apikey": api_key.strip(), "Accept": "application/json"},
+            timeout=GTI_TIMEOUT_SECONDS,
+        )
+        if resp.status_code != 200:
+            return None
+        attrs = (resp.json().get("data") or {}).get("attributes") or {}
+    except Exception as exc:
+        log("WARNING", f"GTI CVE lookup failed for {cve_id}: {exc}")
+        return None
+
+    cisa_kev = attrs.get("cisa_known_exploited") or {}
+    epss = attrs.get("epss") or {}
+    mitigations = attrs.get("available_mitigation") or []
+    exec_summary = (attrs.get("executive_summary") or "").strip()
+
+    result = {
+        "cve_id": cve_id.upper(),
+        "risk_rating": str(attrs.get("risk_rating") or "UNKNOWN").upper(),
+        "exploitation_state": str(attrs.get("exploitation_state") or "Unknown"),
+        "priority": attrs.get("priority"),
+        "consequence": attrs.get("exploitation_consequence"),
+        "cisa_kev": bool(cisa_kev),
+        "ransomware_use": cisa_kev.get("ransomware_use") if isinstance(cisa_kev, dict) else None,
+        "epss_score": epss.get("score") if isinstance(epss, dict) else None,
+        "epss_percentile": epss.get("percentile") if isinstance(epss, dict) else None,
+        "mitigations": mitigations if isinstance(mitigations, list) else [],
+        "executive_summary": exec_summary or None,
+        "mve_id": attrs.get("mve_id"),
+        "gui_url": f"https://www.virustotal.com/gui/collection/vulnerability--{quote(norm_cve, safe='')}",
+    }
+    _gti_enrichment_cache[cache_key] = (now, result)
+    return result
+
+
 def format_gti_enrichment(finding, api_key=None, session=requests):
-    """Build the Slack mrkdwn summary for all IoCs in the finding when GTI_API_KEY is set."""
+    """Build the Slack mrkdwn summary for CVEs and/or IoCs in the finding when GTI_API_KEY is set."""
     api_key = (api_key or os.environ.get("GTI_API_KEY") or "").strip()
     if not api_key:
         return None
-    iocs = extract_iocs(finding)
-    if not iocs:
-        return None
 
     lines = ["*🔎 Google Threat Intelligence (GTI) Verdict:*"]
-    for ioc_type, ioc_val in iocs:
-        info = query_gti_ioc(ioc_type, ioc_val, api_key, session=session)
-        if not info:
-            continue
-        verdict = info["verdict"]
-        if "MALICIOUS" in verdict:
-            badge = ":red_circle: *MALICIOUS*"
-        elif "SUSPICIOUS" in verdict:
-            badge = ":large_orange_circle: *SUSPICIOUS*"
-        else:
-            badge = ":large_green_circle: *CLEAN / BENIGN*"
 
-        meta_parts = [f"Detections: `{info['malicious']}/{info['total']}`"]
-        if info.get("threat_score") is not None:
-            meta_parts.append(f"Score: `{info['threat_score']}`")
-        if info.get("as_owner"):
-            owner = escape_mrkdwn(str(info["as_owner"]))
-            country = f", {escape_mrkdwn(str(info['country']))}" if info.get("country") else ""
-            meta_parts.append(f"ASN: `{owner}{country}`")
+    # 1. Enrich CVE if the finding has a CVE ID
+    cve_info = extract_cve_details(finding)
+    if cve_info is not None:
+        gti_cve = query_gti_cve(cve_info["cve_id"], api_key, session=session)
+        if gti_cve:
+            risk = gti_cve["risk_rating"]
+            badge = (
+                ":red_circle: *CRITICAL RISK*"
+                if risk == "CRITICAL"
+                else (":large_orange_circle: *HIGH RISK*" if risk == "HIGH" else f"*{escape_mrkdwn(risk)}*")
+            )
+            prio = f" | Priority: `{escape_mrkdwn(str(gti_cve['priority']))}`" if gti_cve.get("priority") else ""
+            conseq = f" | Impact: `{escape_mrkdwn(str(gti_cve['consequence']))}`" if gti_cve.get("consequence") else ""
+            lines.append(
+                f"• *GTIG Vulnerability Assessment*: <{gti_cve['gui_url']}|`{escape_mrkdwn(gti_cve['cve_id'])}`> — "
+                f"{badge} (Exploitation: *{escape_mrkdwn(gti_cve['exploitation_state'])}*{prio}{conseq})"
+            )
+            telemetry = []
+            if gti_cve.get("epss_score") is not None:
+                pct = (gti_cve.get("epss_percentile") or 0) * 100
+                telemetry.append(f"EPSS: `{gti_cve['epss_score'] * 100:.2f}% ({pct:.0f}th pct)`")
+            if gti_cve.get("cisa_kev"):
+                rw = f", Ransomware: `{escape_mrkdwn(str(gti_cve['ransomware_use']))}`" if gti_cve.get("ransomware_use") else ""
+                telemetry.append(f"CISA KEV: `Yes`{rw}")
+            if gti_cve.get("mitigations"):
+                mits = ", ".join(str(m) for m in gti_cve["mitigations"][:4])
+                telemetry.append(f"Mitigations: `{escape_mrkdwn(mits)}`")
+            if telemetry:
+                lines.append(f"• *Threat Telemetry*: {' | '.join(telemetry)}")
+            if gti_cve.get("executive_summary"):
+                summary_clean = " ".join(
+                    line.lstrip("* ").strip()
+                    for line in gti_cve["executive_summary"].splitlines()
+                    if line.strip()
+                )
+                lines.append(f"• *GTIG Summary*: {escape_mrkdwn(truncate(summary_clean, 360))}")
 
-        safe_ioc = escape_mrkdwn(info["ioc"])
-        lines.append(
-            f"• *IoC*: <{info['gui_url']}|`{safe_ioc}`> — {badge} ({' | '.join(meta_parts)})"
-        )
+    # 2. Enrich network/host IoCs (IPs, Domains, SHA256 hashes) if present
+    iocs = extract_iocs(finding)
+    if iocs:
+        props = finding.get("sourceProperties") or {}
+        campaign = props.get("campaign")
+        ref_url = props.get("reference")
+        if campaign:
+            safe_camp = escape_mrkdwn(str(campaign))
+            lines.append(
+                f"*Campaign Attribution*: <{ref_url}|{safe_camp}>"
+                if ref_url
+                else f"*Campaign Attribution*: *{safe_camp}*"
+            )
+
+        for ioc_type, ioc_val in iocs:
+            info = query_gti_ioc(ioc_type, ioc_val, api_key, session=session)
+            if not info:
+                continue
+            verdict = info["verdict"]
+            if "MALICIOUS" in verdict:
+                badge = ":red_circle: *MALICIOUS*"
+            elif "SUSPICIOUS" in verdict:
+                badge = ":large_orange_circle: *SUSPICIOUS*"
+            else:
+                badge = ":large_green_circle: *CLEAN / BENIGN*"
+
+            meta_parts = [f"Detections: `{info['malicious']}/{info['total']}`"]
+            if info.get("threat_score") is not None:
+                meta_parts.append(f"Score: `{info['threat_score']}`")
+            if info.get("as_owner"):
+                owner = escape_mrkdwn(str(info["as_owner"]))
+                country = f", {escape_mrkdwn(str(info['country']))}" if info.get("country") else ""
+                meta_parts.append(f"ASN: `{owner}{country}`")
+
+            display_ioc = info["ioc"] if len(info["ioc"]) <= 24 else f"{info['ioc'][:12]}…{info['ioc'][-8:]}"
+            safe_ioc = escape_mrkdwn(display_ioc)
+            lines.append(
+                f"• *{info['label_type']}*: <{info['gui_url']}|`{safe_ioc}`> — {badge} ({' | '.join(meta_parts)})"
+            )
 
     return "\n".join(lines) if len(lines) > 1 else None
 

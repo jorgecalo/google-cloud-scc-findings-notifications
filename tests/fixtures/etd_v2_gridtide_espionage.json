@@ -1,0 +1,51 @@
+{
+  "notificationConfigName": "organizations/123456789012/locations/global/notificationConfigs/scc-slack-notifier",
+  "finding": {
+    "name": "organizations/123456789012/sources/4444444444444444444/locations/global/findings/gridtide2026espionage01",
+    "canonicalName": "projects/222222222222/sources/4444444444444444444/locations/global/findings/gridtide2026espionage01",
+    "parent": "organizations/123456789012/sources/4444444444444444444/locations/global",
+    "resourceName": "//compute.googleapis.com/projects/telecom-prod-01/zones/europe-west1-b/instances/edge-gateway-01",
+    "state": "ACTIVE",
+    "category": "Malware: GRIDTIDE Backdoor & SoftEtherVPN C2 (UNC2814)",
+    "severity": "CRITICAL",
+    "findingClass": "THREAT",
+    "mute": "UNMUTED",
+    "eventTime": "2026-09-25T15:45:00.000Z",
+    "createTime": "2026-09-25T15:45:01.000Z",
+    "description": "Detected execution of /var/tmp/xapt (GRIDTIDE backdoor) and SoftEtherVPN bridge outbound C2 traffic associated with the UNC2814 / GRIDTIDE global espionage campaign.",
+    "nextSteps": "Isolate the compromised workload immediately, revoke Google Service Account tokens used for Google Sheets C2 exfiltration, and block the C2 IPs and dynamic DNS hostnames.",
+    "indicator": {
+      "ipAddresses": [
+        "130.94.6.228",
+        "38.60.194.21"
+      ],
+      "domains": [
+        "1cv2f3d5s6a9w.ddnsfree.com",
+        "admina.freeddns.org"
+      ],
+      "signatures": [
+        {
+          "sha256": "ce36a5fc44cbd7de947130b67be9e732a7b4086fb1df98a5afd724087c973b47"
+        }
+      ]
+    },
+    "sourceProperties": {
+      "campaign": "Disrupting GRIDTIDE Global Espionage Campaign (UNC2814)",
+      "reference": "https://cloud.google.com/blog/topics/threat-intelligence/disrupting-gridtide-global-espionage-campaign",
+      "properties": {
+        "ip": ["130.94.6.228", "38.60.194.21"],
+        "domain": ["1cv2f3d5s6a9w.ddnsfree.com", "admina.freeddns.org"],
+        "sha256": ["ce36a5fc44cbd7de947130b67be9e732a7b4086fb1df98a5afd724087c973b47"]
+      }
+    }
+  },
+  "resource": {
+    "name": "//compute.googleapis.com/projects/telecom-prod-01/zones/europe-west1-b/instances/edge-gateway-01",
+    "displayName": "edge-gateway-01",
+    "type": "google.compute.Instance",
+    "project": "//cloudresourcemanager.googleapis.com/projects/222222222222",
+    "projectDisplayName": "telecom-prod-01",
+    "parent": "//cloudresourcemanager.googleapis.com/projects/222222222222",
+    "parentDisplayName": "telecom-prod-01"
+  }
+}

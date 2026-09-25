@@ -13,5 +13,9 @@ slack_bot_token_ciphertext = "REPLACE-WITH-KMS-CIPHERTEXT-OF-SLACK-BOT-TOKEN"
 # Channel ID is more robust than a name. Invite the bot to the channel.
 slack_channel = "security-gcp-alerts"
 
+# Optional: Base64 KMS ciphertext of a Google Threat Intelligence (GTI) API key
+# to enrich CVE and IoC findings in Slack. Leave unset/empty to disable GTI enrichment.
+# gti_api_key_ciphertext = "REPLACE-WITH-KMS-CIPHERTEXT-OF-GTI-API-KEY"
+
 # Optional: notify only on these projects. Empty means all projects.
 # allowed_projects = ["project-1", "project-2"]

@@ -16,38 +16,53 @@ Security Command Center (SCC) publishes active, unmuted HIGH and CRITICAL findin
 
 ### What a notification looks like
 
-**Exploitable CVE Alert (`WIDE` / `AVAILABLE` exploitability + `CRITICAL` / `HIGH` impact):**
+**Exploitable CVE Alert with GTI Vulnerability Intelligence (`CVE-2021-44228` Log4Shell):**
 
 > A new security finding has been identified: [**[WIDE EXPLOIT | CRITICAL IMPACT] CVE-2021-44228 (SOFTWARE_VULNERABILITY)**](#-message-content)
 >
 > **Project**: example-project-01\
-> **Resource**: vm-instance-prod-1\
+> **Resource**: java-api-prod-01\
 > **Severity**: **CRITICAL** 🚨\
 > **State**: ACTIVE\
-> **Event time**: 2026-09-25T10:00:00Z  `[ View in Cloud Console ]`
+> **Event time**: 2026-09-25T16:50:00.000Z  `[ View in Cloud Console ]`
 >
 > **CVE**: [CVE-2021-44228](https://nvd.nist.gov/vuln/detail/CVE-2021-44228) | [View Org-Wide in SCC](#)\
 > **Exploitability**: **WIDE** | **Impact**: **CRITICAL**\
 > **CVSSv3**: `10.0` | **Upstream Fix**: Yes ✅
 >
-> **Recommendation:**\
-> Upgrade package log4j-core to 2.17.1.
-
-**Threat / Misconfiguration Alert:**
-
-> A new security finding has been identified: [**Malware: Bad IP**](#-message-content)
+> **🔎 Google Threat Intelligence (GTI) Verdict:**\
+> • **GTIG Vulnerability Assessment**: [`CVE-2021-44228`](https://www.virustotal.com/gui/collection/vulnerability--cve-2021-44228) — 🔴 **CRITICAL RISK** (Exploitation: **Wide** | Priority: `P0` | Impact: `Code Execution`)\
+> • **Threat Telemetry**: EPSS: `100.00% (100th pct)` | CISA KEV: `Yes`, Ransomware: `Known` | Mitigations: `Patch, Workaround, Intrusion Prevention Signatures, Firewall`\
+> • **GTIG Summary**: An Input Validation vulnerability exists that, when exploited, allows a remote attacker to execute arbitrary code. This vulnerability has been confirmed to be widely exploited in the wild...
 >
-> **Project**: example-project-01\
-> **Resource**: web-frontend-1\
+> **Recommendation:**\
+> Upgrade package org.apache.logging.log4j:log4j-core to 2.17.1.
+
+**Threat Alert with Google Threat Intelligence (GTI) IoC Enrichment ([Disrupting GRIDTIDE / UNC2814 Demo](https://cloud.google.com/blog/topics/threat-intelligence/disrupting-gridtide-global-espionage-campaign)):**
+
+> A new security finding has been identified: [**Malware: GRIDTIDE Backdoor & SoftEtherVPN C2 (UNC2814)**](#-message-content)
+>
+> **Project**: telecom-prod-01\
+> **Resource**: edge-gateway-01\
 > **Severity**: **CRITICAL** 🚨\
 > **State**: ACTIVE\
-> **Event time**: 2026-09-20T08:15:42.123Z  `[ View in Cloud Console ]`
+> **Event time**: 2026-09-25T15:45:00.000Z  `[ View in Cloud Console ]`
+>
+> **🔎 Google Threat Intelligence (GTI) Verdict:**\
+> **Campaign Attribution**: [Disrupting GRIDTIDE Global Espionage Campaign (UNC2814)](https://cloud.google.com/blog/topics/threat-intelligence/disrupting-gridtide-global-espionage-campaign)\
+> • **IP**: [`130.94.6.228`](https://www.virustotal.com/gui/ip-address/130.94.6.228) — 🔴 **MALICIOUS** (Detections: `12/91` | ASN: `LIGHT NODE LIMITED, VN`)\
+> • **Hostname**: [`1cv2f3d5s6a9…free.com`](https://www.virustotal.com/gui/domain/1cv2f3d5s6a9w.ddnsfree.com) — 🔴 **MALICIOUS** (Detections: `15/91`)\
+> • **SHA256**: [`ce36a5fc44cb…7c973b47`](https://www.virustotal.com/gui/file/ce36a5fc44cbd7de947130b67be9e732a7b4086fb1df98a5afd724087c973b47) — 🔴 **MALICIOUS** (Detections: `35/76`)\
+> • **IP**: [`38.60.194.21`](https://www.virustotal.com/gui/ip-address/38.60.194.21) — 🔴 **MALICIOUS** (Detections: `10/91` | ASN: `LIGHT NODE LIMITED, MY`)
 >
 > **Explanation:**\
-> A VM instance connected to an IP address that is known to be associated with malware & botnets.
+> Detected execution of `/var/tmp/xapt` (GRIDTIDE backdoor) and SoftEtherVPN bridge outbound C2 traffic associated with the UNC2814 / GRIDTIDE global espionage campaign.
 >
 > **Recommendation:**\
-> Review the network connections of the instance and isolate it if the connection is unexpected.
+> Isolate the compromised workload immediately, revoke Google Service Account tokens used for Google Sheets C2 exfiltration, and block the C2 IPs and dynamic DNS hostnames.
+
+> [NOTE]
+> **Optional Google Threat Intelligence (GTI) Enrichment:** The notifications below showcase our richest configuration with live **Google Threat Intelligence (GTI)** verdicts for both CVEs and IoCs. **GTI enrichment is completely optional**—the solution works out-of-the-box without it. A **GTI API key (`GTI_API_KEY` / `gti_api_key_ciphertext`) is required** if you want to enable the additional threat intelligence enrichment. *If you want to test it, feel free to reach out to me!*
 
 ### Quick start
 
@@ -87,6 +102,7 @@ See [Deployment](#-deployment) for the full steps and required permissions.
 - **Organization-wide real-time alerts.** Uses the SCC v2 notification API (`google_scc_v2_organization_notification_config`) across the entire GCP organization.
 - **High-signal CVE filtering.** Automatically restricts `VULNERABILITY` CVE findings to those with **`WIDE`, `AVAILABLE`, or `CONFIRMED` exploitability** and **`CRITICAL` or `HIGH` impact**, eliminating Slack noise from thousands of unexploited CVEs while preserving all other active `CRITICAL` and `HIGH` findings (`THREAT`, `MISCONFIGURATION`, `TOXIC_COMBINATION`, and non-CVE vulnerabilities).
 - **Organization-wide CVE burst deduplication.** Suppresses repeated Slack alerts for the same CVE across all projects in the organization within a configurable cooldown window (`cve_dedup_window_seconds`).
+- **Optional Google Threat Intelligence (GTI) enrichment.** When a GTI API key is provided (`gti_api_key_ciphertext` / `GTI_API_KEY`), the function enriches **CVEs** (GTIG risk rating, priority, exploitation state, consequence, EPSS, CISA KEV, mitigations, and executive summary) and **IoCs** (IPs, domains/hostnames, and SHA-256 hashes with detection ratios and campaign context) directly in Slack. Works seamlessly out-of-the-box without a GTI key.
 - **Readable messages.** Shows category, project, resource, severity, state, event time, and CVE metadata (Exploitability, Impact, CVSSv3 score, Upstream Fix status, and NVD/Organization-wide SCC links), with a button that opens the finding in the Cloud Console.
 - **All finding sources.** Security Health Analytics findings show their explanation and recommendation. Threat detection findings show their description and next steps. Vulnerability findings automatically recommend the fixed package version when available.
 - **Optional project allowlist.** By default, alerts cover the entire organization (`allowed_projects = []`), with optional filtering for specific projects.
@@ -219,6 +235,7 @@ Stage 2 variables are set in `infra/terraform.tfvars`.
 | `project_id` | required | Project that hosts the notifier. |
 | `kms_crypto_key_id` | required | Output `crypto_key_id` of stage 1. |
 | `slack_bot_token_ciphertext` | required | Base64 KMS ciphertext of the Slack bot token. |
+| `gti_api_key_ciphertext` | `""` (optional) | Optional base64 KMS ciphertext of a Google Threat Intelligence (GTI) API key for CVE and IoC enrichment. Leave empty to run without GTI enrichment. |
 | `region` | `europe-west1` | Region for the function, trigger and source bucket. |
 | `slack_channel` | `security-gcp-alerts` | Channel ID or name. |
 | `notification_filter` | see below | Organization-wide SCC findings filter (includes CVE exploitability & impact rules). |
@@ -271,6 +288,8 @@ Each message contains:
 - A link to the finding with its category.
 - The project, resource, severity, state and event time.
 - A **View in Cloud Console** button.
+- CVE details (NVD link, organization-wide SCC link, Exploitability, Impact, CVSSv3 score, and Upstream Fix status) when the finding includes a CVE.
+- **Optional Google Threat Intelligence (GTI) Verdict** for CVEs and IoCs when `GTI_API_KEY` is configured (automatically omitted when no GTI API key is set).
 - Explanation and recommendation. Security Health Analytics provides these in `sourceProperties`. Threat detection findings use `description` and `nextSteps`.
 - Exception instructions, when the finding provides them.
 
@@ -306,14 +325,20 @@ pip install -r app/scc-finding-slack-notifications/requirements.txt pytest
 pytest
 ```
 
-Preview the Slack blocks for a sample notification without sending anything:
+Preview the Slack blocks for a sample notification without sending anything. The script works **without** a GTI API key (standard SCC + CVE output) or **with** `GTI_API_KEY` to include live **Google Threat Intelligence (GTI)** enrichment for **Log4Shell (`CVE-2021-44228`)** and the **[UNC2814 / GRIDTIDE Global Espionage Campaign](https://cloud.google.com/blog/topics/threat-intelligence/disrupting-gridtide-global-espionage-campaign)** *(Note: a GTI API key is required for the additional enrichment—if you want to test it, feel free to reach out to me)*:
 
 ```bash
-cd app/scc-finding-slack-notifications
-python main.py ../../tests/fixtures/etd_v2_malware_bad_ip.json
+# Run without GTI enrichment (works out-of-the-box without any API key):
+python3 app/scc-finding-slack-notifications/main.py tests/fixtures/vuln_v2_log4shell_cve_2021_44228.json
+
+# 1. Test Log4Shell (CVE-2021-44228) with live GTI CVE Risk, Priority (P0), Impact, EPSS & CISA KEV:
+GTI_API_KEY=your_gti_api_key python3 app/scc-finding-slack-notifications/main.py tests/fixtures/vuln_v2_log4shell_cve_2021_44228.json
+
+# 2. Test UNC2814 / GRIDTIDE Espionage Campaign IoCs (IPs, Hostnames, SHA-256) with live GTI verdicts:
+GTI_API_KEY=your_gti_api_key python3 app/scc-finding-slack-notifications/main.py tests/fixtures/etd_v2_gridtide_espionage.json
 ```
 
-Add `--send` to post the message, using `SLACK_BOT_TOKEN` and `SLACK_CHANNEL` from your environment. Validate Terraform changes with:
+Add `--send` to post the message to Slack, using `SLACK_BOT_TOKEN` and `SLACK_CHANNEL` from your environment. Validate Terraform changes with:
 
 ```bash
 terraform -chdir=infra fmt -check -recursive

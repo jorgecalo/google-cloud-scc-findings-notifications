@@ -214,6 +214,81 @@ def test_cve_blocks_include_exploitability_and_impact():
     assert "Upgrade package openssl to 3.0.7." in text
 
 
+def test_gridtide_campaign_ioc_extraction_and_gti_enrichment(monkeypatch):
+    gridtide = load("etd_v2_gridtide_espionage.json")
+    iocs = main.extract_iocs(gridtide["finding"])
+    assert ("ip_addresses", "130.94.6.228") in iocs
+    assert ("domains", "1cv2f3d5s6a9w.ddnsfree.com") in iocs
+    assert ("files", "ce36a5fc44cbd7de947130b67be9e732a7b4086fb1df98a5afd724087c973b47") in iocs
+
+    monkeypatch.setenv("GTI_API_KEY", "dummy-gti-key")
+    monkeypatch.setattr(
+        main,
+        "query_gti_ioc",
+        lambda ioc_type, val, key, session=None: {
+            "ioc": val,
+            "type": ioc_type,
+            "label_type": {"ip_addresses": "IP", "domains": "Hostname", "files": "SHA256"}[ioc_type],
+            "verdict": "MALICIOUS",
+            "malicious": 35,
+            "suspicious": 0,
+            "total": 76,
+            "threat_score": 95,
+            "as_owner": "LIGHT NODE LIMITED",
+            "country": "VN",
+            "gui_url": f"https://www.virustotal.com/gui/search/{val}",
+        },
+    )
+    text = all_text(main.build_blocks(gridtide))
+    assert "Disrupting GRIDTIDE Global Espionage Campaign (UNC2814)" in text
+    assert "130.94.6.228" in text
+    assert ":red_circle: *MALICIOUS*" in text
+
+
+def test_log4shell_cve_gti_enrichment(monkeypatch):
+    log4shell = load("vuln_v2_log4shell_cve_2021_44228.json")
+    assert main.should_notify(log4shell) is True
+
+    monkeypatch.setenv("GTI_API_KEY", "dummy-gti-key")
+    monkeypatch.setattr(
+        main,
+        "query_gti_cve",
+        lambda cve_id, key, session=None: {
+            "cve_id": "CVE-2021-44228",
+            "risk_rating": "CRITICAL",
+            "exploitation_state": "Wide",
+            "priority": "P0",
+            "consequence": "Code Execution",
+            "cisa_kev": True,
+            "ransomware_use": "Known",
+            "epss_score": 0.99999,
+            "epss_percentile": 1.0,
+            "mitigations": ["Patch", "Workaround", "Firewall"],
+            "executive_summary": "An Input Validation vulnerability exists that allows arbitrary code execution.",
+            "mve_id": "MVE-2021-10855",
+            "gui_url": "https://www.virustotal.com/gui/collection/vulnerability--cve-2021-44228",
+        },
+    )
+    text = all_text(main.build_blocks(log4shell))
+    assert "[WIDE EXPLOIT | CRITICAL IMPACT] CVE-2021-44228" in text
+    assert "*GTIG Vulnerability Assessment*" in text
+    assert "Priority: `P0` | Impact: `Code Execution`" in text
+    assert "CISA KEV: `Yes`, Ransomware: `Known`" in text
+    assert "org.apache.logging.log4j:log4j-core to 2.17.1" in text
+
+
+def test_gti_enrichment_is_optional_when_api_key_unset(monkeypatch):
+    monkeypatch.delenv("GTI_API_KEY", raising=False)
+    for fixture_name in ("vuln_v2_log4shell_cve_2021_44228.json", "etd_v2_gridtide_espionage.json"):
+        payload = load(fixture_name)
+        blocks = main.build_blocks(payload)
+        text = all_text(blocks)
+        assert "Google Threat Intelligence (GTI) Verdict" not in text
+        for key in main.PLACEHOLDER_KEYS:
+            assert key not in text
+        assert len(blocks) <= 50
+
+
 # --- Slack API handling -----------------------------------------------------
 
 class FakeResponse:

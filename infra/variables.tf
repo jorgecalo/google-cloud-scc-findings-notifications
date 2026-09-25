@@ -105,8 +105,20 @@ variable "slack_bot_token_ciphertext" {
   }
 }
 
+variable "gti_api_key_ciphertext" {
+  description = "Optional base64 KMS ciphertext of the Google Threat Intelligence (GTI) API key for CVE and IoC enrichment. Leave empty to disable GTI enrichment."
+  type        = string
+  default     = ""
+  sensitive   = true
+
+  validation {
+    condition     = var.gti_api_key_ciphertext == "" || (!startswith(var.gti_api_key_ciphertext, "REPLACE-") && can(regex("^[A-Za-z0-9+/]+={0,2}$", var.gti_api_key_ciphertext)))
+    error_message = "gti_api_key_ciphertext must be empty or a single line base64 KMS ciphertext."
+  }
+}
+
 variable "secret_replica_locations" {
-  description = "Secret Manager replica locations for the Slack bot token."
+  description = "Secret Manager replica locations for secrets."
   type        = list(string)
   default     = ["europe-west1", "europe-west3"]
 }

@@ -158,6 +158,49 @@ resource "google_secret_manager_secret_iam_member" "slack_bot_token" {
 }
 
 ###############################################################################
+# Optional Google Threat Intelligence (GTI) API key in Secret Manager
+###############################################################################
+
+data "google_kms_secret" "gti_api_key" {
+  count      = var.gti_api_key_ciphertext != "" ? 1 : 0
+  crypto_key = var.kms_crypto_key_id
+  ciphertext = var.gti_api_key_ciphertext
+}
+
+resource "google_secret_manager_secret" "gti_api_key" {
+  count     = var.gti_api_key_ciphertext != "" ? 1 : 0
+  project   = var.project_id
+  secret_id = "sccnotifier-gti-api-key"
+
+  replication {
+    user_managed {
+      dynamic "replicas" {
+        for_each = var.secret_replica_locations
+        content {
+          location = replicas.value
+        }
+      }
+    }
+  }
+
+  depends_on = [google_project_service.services]
+}
+
+resource "google_secret_manager_secret_version" "gti_api_key" {
+  count       = var.gti_api_key_ciphertext != "" ? 1 : 0
+  secret      = google_secret_manager_secret.gti_api_key[0].id
+  secret_data = data.google_kms_secret.gti_api_key[0].plaintext
+}
+
+resource "google_secret_manager_secret_iam_member" "gti_api_key" {
+  count     = var.gti_api_key_ciphertext != "" ? 1 : 0
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.gti_api_key[0].secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = google_service_account.sccnotifier.member
+}
+
+###############################################################################
 # Function source
 ###############################################################################
 
@@ -237,6 +280,16 @@ resource "google_cloudfunctions2_function" "cf" {
       secret     = google_secret_manager_secret.slack_bot_token.secret_id
       version    = "latest"
     }
+
+    dynamic "secret_environment_variables" {
+      for_each = var.gti_api_key_ciphertext != "" ? [1] : []
+      content {
+        key        = "GTI_API_KEY"
+        project_id = var.project_id
+        secret     = google_secret_manager_secret.gti_api_key[0].secret_id
+        version    = "latest"
+      }
+    }
   }
 
   event_trigger {
@@ -253,5 +306,7 @@ resource "google_cloudfunctions2_function" "cf" {
     google_project_iam_member.trigger_event_receiver,
     google_secret_manager_secret_iam_member.slack_bot_token,
     google_secret_manager_secret_version.slack_bot_token,
+    google_secret_manager_secret_iam_member.gti_api_key,
+    google_secret_manager_secret_version.gti_api_key,
   ]
 }
