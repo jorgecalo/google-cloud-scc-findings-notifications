@@ -1,5 +1,2 @@
-requests
-
-### Requirements with minimum version
-google-cloud-secret-manager >= 2.2.0
-google-cloud-logging >= 2.2.0
+functions-framework>=3.8,<4
+requests>=2.32,<3

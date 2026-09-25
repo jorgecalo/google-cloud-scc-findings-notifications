@@ -3,14 +3,14 @@
         "type": "section",
         "text": {
             "type": "mrkdwn",
-            "text": "<ALERT_BADGE> *Security Finding Identified*: <<WEB_LINK>|<SUBJECT>>"
+            "text": "A new security finding has been identified: <<WEB_LINK>|<SUBJECT>>"
         }
     },
     {
         "type": "section",
         "text": {
             "type": "mrkdwn",
-            "text": "*Organization*: `<ORG_ID>` (Initial Project: <PROJECT_ID>)\n*Severity*: *<SEVERITY>* <SEV_EMO><CVE_CONTEXT>\n*State*: <STATE>\n*When*: <TIMESTAMP>"
+            "text": "*Project*: <PROJECT_ID>\n*Resource*: <RESOURCE>\n*Severity*: *<SEVERITY>* <SEV_EMO>\n*State*: <STATE>\n*Event time*: <TIMESTAMP>"
         },
         "accessory": {
             "type": "button",
@@ -21,6 +21,13 @@
             "value": "click_view",
             "url": "<WEB_LINK>",
             "action_id": "button-view"
+        }
+    },
+    {
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": "<CVE_DETAILS>"
         }
     },
     {
