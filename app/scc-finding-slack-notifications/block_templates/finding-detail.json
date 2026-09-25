@@ -34,6 +34,13 @@
         "type": "section",
         "text": {
             "type": "mrkdwn",
+            "text": "<GTI_DETAILS>"
+        }
+    },
+    {
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
             "text": "*Explanation:*\n<EXPLANATION>"
         }
     },

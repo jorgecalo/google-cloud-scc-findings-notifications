@@ -9,6 +9,9 @@ Runtime: Python 3.13. Entry point: send_slack_chat_notification
 Environment variables:
   SLACK_BOT_TOKEN         Slack bot token. Injected from Secret Manager.
   SLACK_CHANNEL           Channel ID (recommended) or name to post to.
+  GTI_API_KEY             Optional Google Threat Intelligence (VirusTotal v3)
+                          API key to enrich IoCs (IPs, domains, SHA-256 hashes)
+                          directly in the Slack alert.
   ALLOWED_PROJECTS        Optional comma separated list of project IDs or
                           display names. When set, other projects are skipped.
   ALLOWED_EXPLOITABILITY  Allowed CVE exploitationActivity values (default:
@@ -28,15 +31,60 @@ Error handling:
 
 import base64
 import copy
+import ipaddress
 import json
 import os
 import sys
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
-import requests
+try:
+    import requests
+except ImportError:
+    # Fallback shim so local CLI dry-runs work even without pip packages installed
+    class _UrllibResponse:
+        def __init__(self, status_code, body_bytes):
+            self.status_code = status_code
+            self._body = body_bytes
+
+        def json(self):
+            return json.loads(self._body.decode("utf-8"))
+
+    class _UrllibRequestsShim:
+        class RequestException(Exception):
+            pass
+
+        class ConnectionError(RequestException):
+            pass
+
+        @staticmethod
+        def get(url, headers=None, timeout=10):
+            req = urllib.request.Request(url, headers=headers or {}, method="GET")
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    return _UrllibResponse(resp.status, resp.read())
+            except urllib.error.HTTPError as exc:
+                return _UrllibResponse(exc.code, exc.read())
+            except Exception as exc:
+                raise _UrllibRequestsShim.RequestException(str(exc)) from exc
+
+        @staticmethod
+        def post(url, headers=None, data=None, timeout=10):
+            payload = data.encode("utf-8") if isinstance(data, str) else data
+            req = urllib.request.Request(url, data=payload, headers=headers or {}, method="POST")
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    return _UrllibResponse(resp.status, resp.read())
+            except urllib.error.HTTPError as exc:
+                return _UrllibResponse(exc.code, exc.read())
+            except Exception as exc:
+                raise _UrllibRequestsShim.RequestException(str(exc)) from exc
+
+    requests = _UrllibRequestsShim()
 
 try:
     import functions_framework
@@ -44,14 +92,17 @@ except ImportError:  # Allows the local dry run without the framework.
     functions_framework = None
 
 SLACK_API_URL = "https://slack.com/api/chat.postMessage"
+GTI_API_BASE_URL = "https://www.virustotal.com/api/v3"
 SLACK_SECTION_TEXT_LIMIT = 3000
 SLACK_TIMEOUT_SECONDS = 10
+GTI_TIMEOUT_SECONDS = 4
 CONSOLE_FINDINGS_URL = "https://console.cloud.google.com/security/command-center/findings"
 TEMPLATE_PATH = Path(__file__).parent / "block_templates" / "finding-detail.json"
 
 PLACEHOLDER_KEYS = (
     "SUBJECT", "WEB_LINK", "PROJECT_ID", "RESOURCE", "SEVERITY", "SEV_EMO",
-    "STATE", "TIMESTAMP", "CVE_DETAILS", "EXPLANATION", "RECOMMENDATION", "INSTRUCT",
+    "STATE", "TIMESTAMP", "CVE_DETAILS", "GTI_DETAILS", "EXPLANATION",
+    "RECOMMENDATION", "INSTRUCT",
 )
 
 SEVERITY_EMOJI = {"CRITICAL": ":rotating_light:", "HIGH": ":warning:"}
@@ -67,6 +118,7 @@ TRANSIENT_SLACK_ERRORS = {
 
 _template_cache = None
 _recent_cve_alerts_cache = {}
+_gti_enrichment_cache = {}
 
 
 class TransientError(Exception):
@@ -162,6 +214,163 @@ def extract_cve_details(finding):
         "package_name": offending_pkg.get("packageName"),
         "fixed_version": fixed_pkg.get("version") or fixed_pkg.get("cpeUri"),
     }
+
+
+def _is_routable_ip(ip_str):
+    """Return True if ip_str is a valid non-RFC1918/non-loopback IP address."""
+    try:
+        addr = ipaddress.ip_address(ip_str.strip())
+        return not (addr.is_loopback or addr.is_link_local or addr.is_multicast)
+    except ValueError:
+        return False
+
+
+def extract_iocs(finding, max_iocs=3):
+    """Extract up to max_iocs deduplicated IoCs [(ioc_type, value)] from an SCC finding."""
+    iocs = []
+    seen = set()
+
+    def add_ioc(ioc_type, val):
+        if not val or not isinstance(val, str):
+            return
+        val = val.strip()
+        if not val or (ioc_type, val) in seen:
+            return
+        if ioc_type == "ip_addresses" and not _is_routable_ip(val):
+            return
+        seen.add((ioc_type, val))
+        iocs.append((ioc_type, val))
+
+    indicator = finding.get("indicator") or {}
+    for ip in indicator.get("ipAddresses") or []:
+        add_ioc("ip_addresses", ip)
+    for dom in indicator.get("domains") or []:
+        add_ioc("domains", dom)
+    for sig in indicator.get("signatures") or []:
+        if isinstance(sig, dict) and sig.get("sha256"):
+            add_ioc("files", sig["sha256"])
+
+    props = (finding.get("sourceProperties") or {}).get("properties") or {}
+    if isinstance(props, dict):
+        for key in ("ip", "ips", "ipAddress", "destinationIp"):
+            val = props.get(key)
+            for item in (val if isinstance(val, list) else [val]):
+                add_ioc("ip_addresses", item)
+        for key in ("domain", "domains", "host"):
+            val = props.get(key)
+            for item in (val if isinstance(val, list) else [val]):
+                add_ioc("domains", item)
+        for key in ("sha256", "fileHash"):
+            val = props.get(key)
+            for item in (val if isinstance(val, list) else [val]):
+                add_ioc("files", item)
+
+    for conn in finding.get("connections") or []:
+        if isinstance(conn, dict):
+            add_ioc("ip_addresses", conn.get("destinationIp"))
+
+    for proc in finding.get("processes") or []:
+        if isinstance(proc, dict):
+            binary = proc.get("binary") or {}
+            add_ioc("files", binary.get("sha256"))
+
+    return iocs[:max_iocs]
+
+
+def query_gti_ioc(ioc_type, ioc_value, api_key, session=requests):
+    """Query Google Threat Intelligence (VirusTotal v3) for a single IoC with caching."""
+    cache_key = (ioc_type, ioc_value)
+    now = time.time()
+    cached = _gti_enrichment_cache.get(cache_key)
+    if cached and (now - cached[0]) < 3600:
+        return cached[1]
+
+    url = f"{GTI_API_BASE_URL}/{ioc_type}/{quote(ioc_value, safe='')}"
+    try:
+        resp = session.get(
+            url,
+            headers={"x-apikey": api_key.strip(), "Accept": "application/json"},
+            timeout=GTI_TIMEOUT_SECONDS,
+        )
+        if resp.status_code != 200:
+            return None
+        attrs = (resp.json().get("data") or {}).get("attributes") or {}
+    except Exception as exc:
+        log("WARNING", f"GTI lookup failed for {ioc_value}: {exc}")
+        return None
+
+    stats = attrs.get("last_analysis_stats") or {}
+    malicious = int(stats.get("malicious") or 0)
+    suspicious = int(stats.get("suspicious") or 0)
+    total = sum(int(v or 0) for v in stats.values()) or 0
+
+    gti_assessment = attrs.get("gti_assessment") or {}
+    verdict_obj = gti_assessment.get("verdict") or {}
+    score_obj = gti_assessment.get("threat_score") or {}
+    gti_verdict = verdict_obj.get("value") if isinstance(verdict_obj, dict) else None
+    threat_score = score_obj.get("value") if isinstance(score_obj, dict) else attrs.get("reputation")
+
+    if not gti_verdict:
+        if malicious >= 3:
+            gti_verdict = "MALICIOUS"
+        elif malicious >= 1 or suspicious >= 1:
+            gti_verdict = "SUSPICIOUS"
+        else:
+            gti_verdict = "BENIGN / CLEAN"
+
+    gui_type = {"ip_addresses": "ip-address", "domains": "domain", "files": "file"}.get(ioc_type, "search")
+    result = {
+        "ioc": ioc_value,
+        "type": ioc_type,
+        "verdict": gti_verdict.replace("VERDICT_", ""),
+        "malicious": malicious,
+        "suspicious": suspicious,
+        "total": total,
+        "threat_score": threat_score,
+        "as_owner": attrs.get("as_owner"),
+        "country": attrs.get("country"),
+        "gui_url": f"https://www.virustotal.com/gui/{gui_type}/{quote(ioc_value, safe='')}",
+    }
+    _gti_enrichment_cache[cache_key] = (now, result)
+    return result
+
+
+def format_gti_enrichment(finding, api_key=None, session=requests):
+    """Build the Slack mrkdwn summary for all IoCs in the finding when GTI_API_KEY is set."""
+    api_key = (api_key or os.environ.get("GTI_API_KEY") or "").strip()
+    if not api_key:
+        return None
+    iocs = extract_iocs(finding)
+    if not iocs:
+        return None
+
+    lines = ["*🔎 Google Threat Intelligence (GTI) Verdict:*"]
+    for ioc_type, ioc_val in iocs:
+        info = query_gti_ioc(ioc_type, ioc_val, api_key, session=session)
+        if not info:
+            continue
+        verdict = info["verdict"]
+        if "MALICIOUS" in verdict:
+            badge = ":red_circle: *MALICIOUS*"
+        elif "SUSPICIOUS" in verdict:
+            badge = ":large_orange_circle: *SUSPICIOUS*"
+        else:
+            badge = ":large_green_circle: *CLEAN / BENIGN*"
+
+        meta_parts = [f"Detections: `{info['malicious']}/{info['total']}`"]
+        if info.get("threat_score") is not None:
+            meta_parts.append(f"Score: `{info['threat_score']}`")
+        if info.get("as_owner"):
+            owner = escape_mrkdwn(str(info["as_owner"]))
+            country = f", {escape_mrkdwn(str(info['country']))}" if info.get("country") else ""
+            meta_parts.append(f"ASN: `{owner}{country}`")
+
+        safe_ioc = escape_mrkdwn(info["ioc"])
+        lines.append(
+            f"• *IoC*: <{info['gui_url']}|`{safe_ioc}`> — {badge} ({' | '.join(meta_parts)})"
+        )
+
+    return "\n".join(lines) if len(lines) > 1 else None
 
 
 def should_notify(notification):
@@ -297,6 +506,8 @@ def finding_values(notification):
             fixed = cve_info.get("fixed_version") or "latest patched version"
             recommendation = f"Upgrade package {pkg} to {fixed}."
 
+    gti_details_text = format_gti_enrichment(finding)
+
     return {
         "SUBJECT": subject_text,
         "WEB_LINK": console_url(finding.get("name")),
@@ -307,6 +518,7 @@ def finding_values(notification):
         "STATE": esc(finding.get("state") or "n/a"),
         "TIMESTAMP": esc(finding.get("eventTime") or finding.get("createTime") or "n/a"),
         "CVE_DETAILS": cve_details_text,
+        "GTI_DETAILS": gti_details_text,
         "EXPLANATION": esc(explanation),
         "RECOMMENDATION": esc(recommendation),
         # Quoted security mark names read better as inline code.
@@ -466,8 +678,13 @@ if __name__ == "__main__":
     # Prints the Slack blocks. With --send it also posts them, using the
     # SLACK_BOT_TOKEN and SLACK_CHANNEL environment variables.
     if len(sys.argv) < 2:
-        sys.exit("usage: python main.py <notification.json> [--send]")
-    with open(sys.argv[1], "rt", encoding="utf-8") as fh:
+        sys.exit("usage: python3 main.py <notification.json> [--send]")
+    input_path = Path(sys.argv[1])
+    if not input_path.exists():
+        repo_root_candidate = Path(__file__).resolve().parents[2] / sys.argv[1]
+        if repo_root_candidate.exists():
+            input_path = repo_root_candidate
+    with input_path.open("rt", encoding="utf-8") as fh:
         sample = json.load(fh)
     print(json.dumps(build_blocks(sample), indent=2, ensure_ascii=False))
     if "--send" in sys.argv[2:]:
