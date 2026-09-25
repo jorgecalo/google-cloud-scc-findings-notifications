@@ -16,53 +16,148 @@ Security Command Center (SCC) publishes active, unmuted HIGH and CRITICAL findin
 
 ### What a notification looks like
 
-**Exploitable CVE Alert with GTI Vulnerability Intelligence (`CVE-2021-44228` Log4Shell):**
+#### 1️⃣ Exploitable CVE Alert with GTI Vulnerability Intelligence (`CVE-2021-44228` Log4Shell)
 
-> A new security finding has been identified: [**[WIDE EXPLOIT | CRITICAL IMPACT] CVE-2021-44228 (SOFTWARE_VULNERABILITY)**](#-message-content)
->
-> **Project**: example-project-01\
-> **Resource**: java-api-prod-01\
-> **Severity**: **CRITICAL** 🚨\
-> **State**: ACTIVE\
-> **Event time**: 2026-09-25T16:50:00.000Z  `[ View in Cloud Console ]`
->
-> **CVE**: [CVE-2021-44228](https://nvd.nist.gov/vuln/detail/CVE-2021-44228) | [View Org-Wide in SCC](#)\
-> **Exploitability**: **WIDE** | **Impact**: **CRITICAL**\
-> **CVSSv3**: `10.0` | **Upstream Fix**: Yes ✅
->
-> **🔎 Google Threat Intelligence (GTI) Verdict:**\
-> • **GTIG Vulnerability Assessment**: [`CVE-2021-44228`](https://www.virustotal.com/gui/collection/vulnerability--cve-2021-44228) — 🔴 **CRITICAL RISK** (Exploitation: **Wide** | Priority: `P0` | Impact: `Code Execution`)\
-> • **Threat Telemetry**: EPSS: `100.00% (100th pct)` | CISA KEV: `Yes`, Ransomware: `Known` | Mitigations: `Patch, Workaround, Intrusion Prevention Signatures, Firewall`\
-> • **GTIG Summary**: An Input Validation vulnerability exists that, when exploited, allows a remote attacker to execute arbitrary code. This vulnerability has been confirmed to be widely exploited in the wild...
->
-> **Recommendation:**\
-> Upgrade package org.apache.logging.log4j:log4j-core to 2.17.1.
+<table>
+  <thead>
+    <tr>
+      <th colspan="2" align="left">
+        🛡️ <b>SCC Security Notifier</b> &nbsp;<img src="https://img.shields.io/badge/APP-4A154B?logo=slack&logoColor=white" align="absmiddle" alt="Slack App" /> &nbsp;<code>#security-gcp-alerts</code> &nbsp;•&nbsp; <sub>16:50 UTC</sub>
+      </th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td colspan="2">
+        A new security finding has been identified: <a href="#-message-content"><b>[WIDE EXPLOIT | CRITICAL IMPACT] CVE-2021-44228 (SOFTWARE_VULNERABILITY)</b></a>
+      </td>
+    </tr>
+    <tr>
+      <td width="72%" valign="top">
+        <b>Project:</b> <code>example-project-01</code> &nbsp;&nbsp;|&nbsp;&nbsp; <b>Resource:</b> <code>java-api-prod-01</code><br/>
+        <b>Severity:</b> <b>CRITICAL</b> 🚨 &nbsp;&nbsp;|&nbsp;&nbsp; <b>State:</b> <code>ACTIVE</code><br/>
+        <b>Event time:</b> <code>2026-09-25T16:50:00.000Z</code>
+      </td>
+      <td width="28%" align="right" valign="middle">
+        <a href="https://console.cloud.google.com/security/command-center/findingsv2"><img src="https://img.shields.io/badge/View_in_Cloud_Console_%E2%86%97-1A73E8?style=for-the-badge&logo=googlecloud&logoColor=white" alt="View in Cloud Console" /></a>
+      </td>
+    </tr>
+    <tr>
+      <td colspan="2">
+        <b>CVE:</b> <a href="https://nvd.nist.gov/vuln/detail/CVE-2021-44228">CVE-2021-44228</a> &nbsp;|&nbsp; <a href="https://console.cloud.google.com/security/command-center/findingsv2">View Org-Wide in SCC</a><br/>
+        <b>Exploitability:</b> <img src="https://img.shields.io/badge/WIDE-D93025?style=flat-square" align="absmiddle" alt="WIDE" /> &nbsp;|&nbsp; <b>Impact:</b> <img src="https://img.shields.io/badge/CRITICAL-D93025?style=flat-square" align="absmiddle" alt="CRITICAL" /><br/>
+        <b>CVSSv3:</b> <code>10.0</code> &nbsp;|&nbsp; <b>Upstream Fix:</b> Yes ✅
+      </td>
+    </tr>
+    <tr>
+      <td colspan="2">
+        <b>🔎 Google Threat Intelligence (GTI) Verdict:</b><br/>
+        • <b>GTIG Vulnerability Assessment:</b> <a href="https://www.virustotal.com/gui/collection/vulnerability--cve-2021-44228"><code>CVE-2021-44228</code></a> — 🔴 <b>CRITICAL RISK</b> &nbsp;<img src="https://img.shields.io/badge/Exploitation-Wide-D93025?style=flat-square" align="absmiddle" alt="Wide" /> <img src="https://img.shields.io/badge/Priority-P0-B31412?style=flat-square" align="absmiddle" alt="P0" /> <img src="https://img.shields.io/badge/Impact-Code_Execution-EA4335?style=flat-square" align="absmiddle" alt="Code Execution" /><br/>
+        • <b>Threat Telemetry:</b> EPSS: <code>100.00% (100th pct)</code> &nbsp;|&nbsp; CISA KEV: <code>Yes</code>, Ransomware: <code>Known</code> &nbsp;|&nbsp; Mitigations: <code>Patch, Workaround, Intrusion Prevention Signatures, Firewall</code><br/>
+        • <b>GTIG Summary:</b> <i>An Input Validation vulnerability exists that, when exploited, allows a remote attacker to execute arbitrary code. This vulnerability has been confirmed to be widely exploited in the wild...</i>
+      </td>
+    </tr>
+    <tr>
+      <td colspan="2">
+        <b>Recommendation:</b><br/>
+        Upgrade package <code>org.apache.logging.log4j:log4j-core</code> to <code>2.17.1</code>.
+      </td>
+    </tr>
+  </tbody>
+</table>
 
-**Threat Alert with Google Threat Intelligence (GTI) IoC Enrichment ([Disrupting GRIDTIDE / UNC2814 Demo](https://cloud.google.com/blog/topics/threat-intelligence/disrupting-gridtide-global-espionage-campaign)):**
+#### 2️⃣ Threat Alert with GTI IoC Enrichment ([Disrupting GRIDTIDE / UNC2814 Espionage Campaign](https://cloud.google.com/blog/topics/threat-intelligence/disrupting-gridtide-global-espionage-campaign))
 
-> A new security finding has been identified: [**Malware: GRIDTIDE Backdoor & SoftEtherVPN C2 (UNC2814)**](#-message-content)
->
-> **Project**: telecom-prod-01\
-> **Resource**: edge-gateway-01\
-> **Severity**: **CRITICAL** 🚨\
-> **State**: ACTIVE\
-> **Event time**: 2026-09-25T15:45:00.000Z  `[ View in Cloud Console ]`
->
-> **🔎 Google Threat Intelligence (GTI) Verdict:**\
-> **Campaign Attribution**: [Disrupting GRIDTIDE Global Espionage Campaign (UNC2814)](https://cloud.google.com/blog/topics/threat-intelligence/disrupting-gridtide-global-espionage-campaign)\
-> • **IP**: [`130.94.6.228`](https://www.virustotal.com/gui/ip-address/130.94.6.228) — 🔴 **MALICIOUS** (Detections: `12/91` | ASN: `LIGHT NODE LIMITED, VN`)\
-> • **Hostname**: [`1cv2f3d5s6a9…free.com`](https://www.virustotal.com/gui/domain/1cv2f3d5s6a9w.ddnsfree.com) — 🔴 **MALICIOUS** (Detections: `15/91`)\
-> • **SHA256**: [`ce36a5fc44cb…7c973b47`](https://www.virustotal.com/gui/file/ce36a5fc44cbd7de947130b67be9e732a7b4086fb1df98a5afd724087c973b47) — 🔴 **MALICIOUS** (Detections: `35/76`)\
-> • **IP**: [`38.60.194.21`](https://www.virustotal.com/gui/ip-address/38.60.194.21) — 🔴 **MALICIOUS** (Detections: `10/91` | ASN: `LIGHT NODE LIMITED, MY`)
->
-> **Explanation:**\
-> Detected execution of `/var/tmp/xapt` (GRIDTIDE backdoor) and SoftEtherVPN bridge outbound C2 traffic associated with the UNC2814 / GRIDTIDE global espionage campaign.
->
-> **Recommendation:**\
-> Isolate the compromised workload immediately, revoke Google Service Account tokens used for Google Sheets C2 exfiltration, and block the C2 IPs and dynamic DNS hostnames.
+<table>
+  <thead>
+    <tr>
+      <th colspan="2" align="left">
+        🛡️ <b>SCC Security Notifier</b> &nbsp;<img src="https://img.shields.io/badge/APP-4A154B?logo=slack&logoColor=white" align="absmiddle" alt="Slack App" /> &nbsp;<code>#security-gcp-alerts</code> &nbsp;•&nbsp; <sub>15:45 UTC</sub>
+      </th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td colspan="2">
+        A new security finding has been identified: <a href="#-message-content"><b>Malware: GRIDTIDE Backdoor &amp; SoftEtherVPN C2 (UNC2814)</b></a>
+      </td>
+    </tr>
+    <tr>
+      <td width="72%" valign="top">
+        <b>Project:</b> <code>telecom-prod-01</code> &nbsp;&nbsp;|&nbsp;&nbsp; <b>Resource:</b> <code>edge-gateway-01</code><br/>
+        <b>Severity:</b> <b>CRITICAL</b> 🚨 &nbsp;&nbsp;|&nbsp;&nbsp; <b>State:</b> <code>ACTIVE</code><br/>
+        <b>Event time:</b> <code>2026-09-25T15:45:00.000Z</code>
+      </td>
+      <td width="28%" align="right" valign="middle">
+        <a href="https://console.cloud.google.com/security/command-center/findingsv2"><img src="https://img.shields.io/badge/View_in_Cloud_Console_%E2%86%97-1A73E8?style=for-the-badge&logo=googlecloud&logoColor=white" alt="View in Cloud Console" /></a>
+      </td>
+    </tr>
+    <tr>
+      <td colspan="2">
+        <b>🔎 Google Threat Intelligence (GTI) Verdict:</b><br/>
+        <b>Campaign Attribution:</b> <a href="https://cloud.google.com/blog/topics/threat-intelligence/disrupting-gridtide-global-espionage-campaign">Disrupting GRIDTIDE Global Espionage Campaign (UNC2814)</a><br/>
+        • <b>IP:</b> <a href="https://www.virustotal.com/gui/ip-address/130.94.6.228"><code>130.94.6.228</code></a> — 🔴 <img src="https://img.shields.io/badge/MALICIOUS-12%2F91-D93025?style=flat-square" align="absmiddle" alt="MALICIOUS 12/91" /> &nbsp;<sub>ASN: <code>LIGHT NODE LIMITED, VN</code></sub><br/>
+        • <b>Hostname:</b> <a href="https://www.virustotal.com/gui/domain/1cv2f3d5s6a9w.ddnsfree.com"><code>1cv2f3d5s6a9…free.com</code></a> — 🔴 <img src="https://img.shields.io/badge/MALICIOUS-15%2F91-D93025?style=flat-square" align="absmiddle" alt="MALICIOUS 15/91" /><br/>
+        • <b>SHA256:</b> <a href="https://www.virustotal.com/gui/file/ce36a5fc44cbd7de947130b67be9e732a7b4086fb1df98a5afd724087c973b47"><code>ce36a5fc44cb…7c973b47</code></a> — 🔴 <img src="https://img.shields.io/badge/MALICIOUS-35%2F76-D93025?style=flat-square" align="absmiddle" alt="MALICIOUS 35/76" /><br/>
+        • <b>IP:</b> <a href="https://www.virustotal.com/gui/ip-address/38.60.194.21"><code>38.60.194.21</code></a> — 🔴 <img src="https://img.shields.io/badge/MALICIOUS-10%2F91-D93025?style=flat-square" align="absmiddle" alt="MALICIOUS 10/91" /> &nbsp;<sub>ASN: <code>LIGHT NODE LIMITED, MY</code></sub>
+      </td>
+    </tr>
+    <tr>
+      <td colspan="2">
+        <b>Explanation:</b><br/>
+        Detected execution of <code>/var/tmp/xapt</code> (GRIDTIDE backdoor) and SoftEtherVPN bridge outbound C2 traffic associated with the UNC2814 / GRIDTIDE global espionage campaign.<br/><br/>
+        <b>Recommendation:</b><br/>
+        Isolate the compromised workload immediately, revoke Google Service Account tokens used for Google Sheets C2 exfiltration, and block the C2 IPs and dynamic DNS hostnames.
+      </td>
+    </tr>
+  </tbody>
+</table>
 
-> [NOTE]
-> **Optional Google Threat Intelligence (GTI) Enrichment:** The notifications below showcase our richest configuration with live **Google Threat Intelligence (GTI)** verdicts for both CVEs and IoCs. **GTI enrichment is completely optional**—the solution works out-of-the-box without it. A **GTI API key (`GTI_API_KEY` / `gti_api_key_ciphertext`) is required** if you want to enable the additional threat intelligence enrichment. *If you want to test it, feel free to reach out to me!*
+<details>
+<summary><b>▶️ Replay these exact demo messages in your own Slack channel (1 command)</b></summary>
+
+You can post either demo notification directly into a real Slack channel from your terminal using `--send`:
+
+```bash
+# Replay Demo 1: Log4Shell (CVE-2021-44228) to Slack (with optional GTI_API_KEY)
+SLACK_BOT_TOKEN=xoxb-your-token \
+SLACK_CHANNEL=C0123456789 \
+GTI_API_KEY=your_optional_gti_key \
+python3 app/scc-finding-slack-notifications/main.py tests/fixtures/vuln_v2_log4shell_cve_2021_44228.json --send
+
+# Replay Demo 2: UNC2814 / GRIDTIDE Espionage Campaign to Slack (with optional GTI_API_KEY)
+SLACK_BOT_TOKEN=xoxb-your-token \
+SLACK_CHANNEL=C0123456789 \
+GTI_API_KEY=your_optional_gti_key \
+python3 app/scc-finding-slack-notifications/main.py tests/fixtures/etd_v2_gridtide_espionage.json --send
+```
+</details>
+
+<table>
+  <thead>
+    <tr>
+      <th colspan="3" align="center">
+        💡 <b>Note: Google Threat Intelligence (GTI) Enrichment is Optional</b> &nbsp;<img src="https://img.shields.io/badge/GTI_Enrichment-Optional_Add--on-4285F4?style=flat-square&logo=googlecloud&logoColor=white" align="absmiddle" alt="GTI Enrichment Optional" />
+      </th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td width="33%" valign="top">
+        ✅ <b>Works Out-of-the-Box</b><br/>
+        <sub>GTI enrichment is <b>100% optional</b>. Without a GTI key, the pipeline sends all SCC &amp; CVE alerts normally and automatically omits the GTI verdict block.</sub>
+      </td>
+      <td width="34%" valign="top">
+        🔑 <b>GTI API Key Required</b><br/>
+        <sub>To enable the live CVE &amp; IoC verdicts shown in the demos above, provide a GTI API key via <code>gti_api_key_ciphertext</code> (Terraform) or <code>GTI_API_KEY</code> (CLI).</sub>
+      </td>
+      <td width="33%" valign="top">
+        💬 <b>Want to Test It?</b><br/>
+        <sub><i>If you want to test the additional Google Threat Intelligence enrichment, feel free to reach out to me!</i></sub>
+      </td>
+    </tr>
+  </tbody>
+</table>
 
 ### Quick start
 
