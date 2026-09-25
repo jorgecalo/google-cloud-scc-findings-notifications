@@ -58,15 +58,8 @@ resource "google_scc_notification_config" "custom_notification_config" {
   pubsub_topic = google_pubsub_topic.sccfindings.id
 
   streaming_config {
-    filter = "severity = \"HIGH\" OR severity= \"CRITICAL\" AND state = \"ACTIVE\""
-    #HERE YOU CAN FILTER ON PROJECTS WHICH TO INCLUDE. Figure out the filtering for multiple projects AND "..."
-    # projects = [
-    #      "project-1", 
-    #      "project-2", 
-    #      "project-3", 
-    #      "project-4"
-    #]
-
+    # Evaluates across the entire GCP Organization (var.gcp_org_id) without per-project restriction
+    filter = var.scc_notification_filter
   }
 }
 
@@ -108,6 +101,7 @@ data "archive_file" "source" {
   type        = "zip"
   source_dir  = "${path.root}/../app/scc-finding-slack-notifications"
   output_path = "${path.root}/../cf-scc-notification.zip"
+  excludes    = ["test_main.py", "payload_test.json", "__pycache__"]
 }
 
 # Add source code zip to bucket
@@ -134,7 +128,12 @@ resource "google_cloudfunctions_function" "cf" {
   ingress_settings    = "ALLOW_INTERNAL_AND_GCLB"
 
   environment_variables = {
-    SLACK_BOT_TOKEN = format("%s/versions/latest", google_secret_manager_secret.slack_bot_token.id)
+    SLACK_BOT_TOKEN        = format("%s/versions/latest", google_secret_manager_secret.slack_bot_token.id)
+    GCP_PROJECT_ID         = var.gcp_project_id
+    ALLOWED_EXPLOITABILITY = "WIDE,AVAILABLE,CONFIRMED"
+    ALLOWED_CVE_IMPACT     = "CRITICAL,HIGH"
+    DEDUP_WINDOW_SECONDS   = var.cve_dedup_window_seconds
+    REQUIRE_UPSTREAM_FIX   = "false"
   }
 
   source_archive_bucket = google_storage_bucket.function_bucket.name

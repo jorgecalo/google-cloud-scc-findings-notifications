@@ -6,27 +6,19 @@ Eenable SCC to publish findings to the Pubsub topic. This action requires permis
 
 Replace the [INSERT-ORG-ID] with the ORGID (Number) in the variables file.
 
-```
-    gcloud scc notifications create scc-critical-and-high-severity-findings-notify \
-   --pubsub-topic projects/tf-scc-notifier/topics/scc-findingsnotifier-topic \
-   --organization [INSERT-ORG-ID] \
-   --filter "(severity=\"HIGH\" OR severity=\"CRITICAL\") AND state=\"ACTIVE\""
+```bash
+gcloud scc notifications create scc-critical-and-high-severity-findings-notify \
+  --pubsub-topic projects/tf-scc-notifier/topics/scc-findingsnotifier-topic \
+  --organization [INSERT-ORG-ID] \
+  --filter 'state="ACTIVE" AND (severity="HIGH" OR severity="CRITICAL") AND (finding_class!="VULNERABILITY" OR vulnerability.cve.id="" OR ((vulnerability.cve.exploitation_activity="WIDE" OR vulnerability.cve.exploitation_activity="AVAILABLE" OR vulnerability.cve.exploitation_activity="CONFIRMED") AND (vulnerability.cve.impact="CRITICAL" OR vulnerability.cve.impact="HIGH")))'
 ```
 
-Filtering Security Command Center findings based on the most important projects is done by adjusting the 
-filter option of the streaming_config:
+Filtering Security Command Center findings **across the entire GCP Organization** (`var.gcp_org_id`) for exploitable CVEs (`WIDE` / `AVAILABLE` exploitability + `CRITICAL` / `HIGH` impact) while still covering all other active `CRITICAL` and `HIGH` security findings (`THREAT`, `MISCONFIGURATION`, `TOXIC_COMBINATION`, etc.) is configured in `streaming_config`:
 
-```
+```hcl
   streaming_config {
-    filter = "severity = \"HIGH\" OR severity= \"CRITICAL\" AND state = \"ACTIVE\""
-        projects = [
-           "project-1", 
-           "project-2", 
-           "project-3", 
-           "project-4"
-    ]
+    filter = "state = \"ACTIVE\" AND (severity = \"HIGH\" OR severity = \"CRITICAL\") AND (finding_class != \"VULNERABILITY\" OR vulnerability.cve.id = \"\" OR ((vulnerability.cve.exploitation_activity = \"WIDE\" OR vulnerability.cve.exploitation_activity = \"AVAILABLE\" OR vulnerability.cve.exploitation_activity = \"CONFIRMED\") AND (vulnerability.cve.impact = \"CRITICAL\" OR vulnerability.cve.impact = \"HIGH\")))"
   }
-}
 ```
 
 ***Create an Slack app and install it into your Workspace***

@@ -46,14 +46,15 @@ variable "gcp_cloudstorage_name_bucket" {
   type        = string
 }
 
-# variable "gcp_cloudstorage_name_zipfile" {
-#   description = "Name zip file stored in Cloud Storage Bucket"
-#   default     = "?"
-#   type        = string
-# }
+variable "scc_notification_filter" {
+  description = "SCC streaming notification filter. Covers all ACTIVE CRITICAL/HIGH non-CVE findings (Threats, Misconfigurations, Toxic Combinations, non-CVE Vulnerabilities) while strictly filtering CVE findings to WIDE/AVAILABLE/CONFIRMED exploitability and CRITICAL/HIGH impact."
+  type        = string
+  default     = "state = \"ACTIVE\" AND (severity = \"HIGH\" OR severity = \"CRITICAL\") AND (finding_class != \"VULNERABILITY\" OR vulnerability.cve.id = \"\" OR ((vulnerability.cve.exploitation_activity = \"WIDE\" OR vulnerability.cve.exploitation_activity = \"AVAILABLE\" OR vulnerability.cve.exploitation_activity = \"CONFIRMED\") AND (vulnerability.cve.impact = \"CRITICAL\" OR vulnerability.cve.impact = \"HIGH\")))"
+}
 
-# variable "gcp_cloudfunction_name" {
-#   description = "?"
-#   default     = "?"
-#   type        = string
-# }
+variable "cve_dedup_window_seconds" {
+  description = "Cooldown window in seconds to deduplicate repeated alerts for the same CVE in the Cloud Function"
+  type        = string
+  default     = "3600"
+}
+

@@ -3,14 +3,14 @@
         "type": "section",
         "text": {
             "type": "mrkdwn",
-            "text": "A new security finding has been identified: <<WEB_LINK>|<SUBJECT>>"
+            "text": "<ALERT_BADGE> *Security Finding Identified*: <<WEB_LINK>|<SUBJECT>>"
         }
     },
     {
         "type": "section",
         "text": {
             "type": "mrkdwn",
-            "text": "*Project*: <PROJECT_ID>\n*Severity*: *<SEVERITY>* <SEV_EMO>\n*State*: <STATE>\n*When*: <TIMESTAMP>"
+            "text": "*Organization*: `<ORG_ID>` (Initial Project: <PROJECT_ID>)\n*Severity*: *<SEVERITY>* <SEV_EMO><CVE_CONTEXT>\n*State*: <STATE>\n*When*: <TIMESTAMP>"
         },
         "accessory": {
             "type": "button",
